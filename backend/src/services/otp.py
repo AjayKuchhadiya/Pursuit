@@ -1,12 +1,15 @@
-"""OTP generation, hashing, and verification helpers."""
+"""OTP generation, hashing, and verification helpers.
+
+OTPs are short-lived (5 min) single-use 6-digit codes.
+SHA-256 + hmac.compare_digest is perfectly secure for this use case
+and avoids the passlib/bcrypt 4.x version incompatibility.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
-
-from passlib.context import CryptContext
-
-_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 OTP_LENGTH = 6
 
@@ -17,10 +20,10 @@ def generate_otp() -> str:
 
 
 def hash_otp(otp: str) -> str:
-    """Return a bcrypt hash of *otp*."""
-    return _ctx.hash(otp)
+    """Return a SHA-256 hex digest of *otp*."""
+    return hashlib.sha256(otp.encode()).hexdigest()
 
 
 def verify_otp(plain: str, hashed: str) -> bool:
-    """Return ``True`` if *plain* matches *hashed*."""
-    return _ctx.verify(plain, hashed)
+    """Return ``True`` if *plain* matches *hashed* (timing-safe)."""
+    return hmac.compare_digest(hashlib.sha256(plain.encode()).hexdigest(), hashed)

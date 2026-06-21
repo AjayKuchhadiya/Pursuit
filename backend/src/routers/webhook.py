@@ -6,8 +6,11 @@ POST /webhook  – Incoming button-tap events → gamification → reply
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel
 
 from config import settings
 from database import SupabaseDep
@@ -30,12 +33,39 @@ async def verify_webhook(
     return hub_challenge
 
 
+# ── Swagger-friendly test body ────────────────────────────────────────────────
+
+class WebhookPayload(BaseModel):
+    """
+    Mirrors Meta's webhook payload structure.
+
+    **Quick test in Swagger – paste one of these:**
+
+    Tap Done (100%):
+    ```json
+    {"entry":[{"changes":[{"value":{"messages":[{"from":"+917457878864","type":"interactive","interactive":{"button_reply":{"id":"log_100"}}}]}}]}]}
+    ```
+    Tap Halfway (50%):
+    ```json
+    {"entry":[{"changes":[{"value":{"messages":[{"from":"+917457878864","type":"interactive","interactive":{"button_reply":{"id":"log_50"}}}]}}]}]}
+    ```
+    Apply Casual Leave:
+    ```json
+    {"entry":[{"changes":[{"value":{"messages":[{"from":"+917457878864","type":"interactive","interactive":{"button_reply":{"id":"apply_cl"}}}]}}]}]}
+    ```
+    """
+    entry: list[Any]
+
+
 # ── POST: Incoming messages ───────────────────────────────────────────────────
 
 @router.post("", status_code=status.HTTP_200_OK)
-async def receive_webhook(request: Request, db: SupabaseDep) -> dict:  # type: ignore[type-arg]
+async def receive_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # type: ignore[type-arg]
     """Parse Meta's webhook payload and process interactive button replies."""
-    payload = await request.json()
+    try:
+        payload = body.model_dump()
+    except Exception:
+        return {"status": "ignored"}
 
     try:
         entry = payload["entry"][0]
@@ -70,7 +100,7 @@ async def receive_webhook(request: Request, db: SupabaseDep) -> dict:  # type: i
         await db.table("users")
         .select("id, personality")
         .eq("phone_number", phone)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not user_res.data:
@@ -81,7 +111,7 @@ async def receive_webhook(request: Request, db: SupabaseDep) -> dict:  # type: i
         )
         return {"status": "unregistered"}
 
-    user = user_res.data
+    user = user_res.data[0]
     user_id: str = user["id"]
     personality: str = user["personality"]
 
@@ -111,10 +141,10 @@ async def receive_webhook(request: Request, db: SupabaseDep) -> dict:  # type: i
             await db.table("leave_balance")
             .select("balance")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        balance = float((bal_res.data or {}).get("balance", 0.0))
+        balance = float(((bal_res.data or [{}])[0] or {}).get("balance", 0.0))
         if balance < 1.0:
             await whatsapp.send_text_message(
                 phone,

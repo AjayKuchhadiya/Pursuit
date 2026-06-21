@@ -28,14 +28,14 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    result = await db.table("users").select("*").eq("id", user_id).maybe_single().execute()
-    if result.data is None:
+    result = await db.table("users").select("*").eq("id", user_id).limit(1).execute()
+    if not result.data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return result.data  # type: ignore[return-value]
+    return result.data[0]  # type: ignore[return-value]
 
 
 CurrentUser = Annotated[dict, Depends(get_current_user)]  # type: ignore[type-arg]

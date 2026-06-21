@@ -40,18 +40,18 @@ async def get_stats(db: SupabaseDep, user: CurrentUser) -> dict:  # type: ignore
         await db.table("streaks")
         .select("current_streak, all_time_high")
         .eq("user_id", user["id"])
-        .maybe_single()
         .execute()
     )
     bal_res = (
         await db.table("leave_balance")
         .select("balance")
         .eq("user_id", user["id"])
-        .maybe_single()
         .execute()
     )
+    streak_data = (streak_res.data or [{}])[0] if streak_res.data else {}
+    bal_data = (bal_res.data or [{}])[0] if bal_res.data else {}
     return {
-        "current_streak": (streak_res.data or {}).get("current_streak", 0),
-        "all_time_high": (streak_res.data or {}).get("all_time_high", 0),
-        "cl_balance": float((bal_res.data or {}).get("balance", 3.0)),
+        "current_streak": streak_data.get("current_streak", 0),
+        "all_time_high": streak_data.get("all_time_high", 0),
+        "cl_balance": float(bal_data.get("balance", 3.0)),
     }

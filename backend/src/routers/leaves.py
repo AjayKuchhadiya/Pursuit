@@ -21,10 +21,10 @@ async def get_leave_balance(db: SupabaseDep, user: CurrentUser) -> dict:  # type
         await db.table("leave_balance")
         .select("balance")
         .eq("user_id", user["id"])
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    balance = float((res.data or {}).get("balance", 3.0))
+    balance = float(((res.data or [{}])[0] or {}).get("balance", 3.0))
     return {"balance": balance}
 
 
@@ -67,10 +67,10 @@ async def apply_casual_leave(db: SupabaseDep, user: CurrentUser) -> dict:  # typ
         await db.table("leave_balance")
         .select("balance")
         .eq("user_id", user_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    balance = float((bal_res.data or {}).get("balance", 0.0))
+    balance = float(((bal_res.data or [{}])[0] or {}).get("balance", 0.0))
     if balance < 1.0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
