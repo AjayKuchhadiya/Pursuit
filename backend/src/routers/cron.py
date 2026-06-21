@@ -54,10 +54,10 @@ async def daily_ping(
             await db.table("leave_balance")
             .select("balance")
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        cl_balance = float((bal_res.data or {}).get("balance", 3.0))
+        cl_balance = float(((bal_res.data or [{}])[0] or {}).get("balance", 3.0))
 
         try:
             await whatsapp.send_interactive_checkin(

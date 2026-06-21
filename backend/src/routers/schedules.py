@@ -68,12 +68,12 @@ async def _fetch(db: SupabaseDep, schedule_id: UUID, user_id: str) -> dict:  # t
         await db.table("schedules")
         .select("*")
         .eq("id", str(schedule_id))
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not res.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
-    return res.data  # type: ignore[return-value]
+    return res.data[0]  # type: ignore[return-value]
 
 
 def _assert_owns(schedule: dict, user_id: str | None = None) -> None:  # type: ignore[type-arg]

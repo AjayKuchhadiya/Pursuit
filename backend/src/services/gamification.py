@@ -65,17 +65,17 @@ async def process_log(
     ).execute()
 
     # ── 2. Fetch current streak & CL balance ──────────────────────────────────
-    streak_row = (
-        await db.table("streaks").select("*").eq("user_id", user_id).maybe_single().execute()
-    ).data or {"current_streak": 0, "all_time_high": 0, "last_active_date": None}
+    _streak_res = await db.table("streaks").select("*").eq("user_id", user_id).limit(1).execute()
+    streak_row = (_streak_res.data or [{}])[0] or {"current_streak": 0, "all_time_high": 0, "last_active_date": None}
 
-    balance_row = (
+    _bal_res = (
         await db.table("leave_balance")
         .select("balance")
         .eq("user_id", user_id)
-        .maybe_single()
+        .limit(1)
         .execute()
-    ).data or {"balance": 3.0}
+    )
+    balance_row = (_bal_res.data or [{}])[0] or {"balance": 3.0}
 
     current_streak: int = streak_row["current_streak"]
     all_time_high: int = streak_row["all_time_high"]
