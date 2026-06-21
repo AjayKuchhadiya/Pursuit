@@ -1,0 +1,26 @@
+name: Daily Pursuit Check-In Ping
+
+on:
+  schedule:
+    # 15:30 UTC = 9:00 PM IST (UTC+5:30)
+    - cron: "30 15 * * *"
+  # Allow manual trigger from GitHub Actions UI for testing
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Send daily check-in messages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily ping endpoint
+        run: |
+          STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+            --max-time 30 \
+            -X POST "${{ secrets.API_BASE_URL }}/cron/daily-ping" \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}")
+
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Daily ping failed with HTTP $STATUS"
+            exit 1
+          fi
