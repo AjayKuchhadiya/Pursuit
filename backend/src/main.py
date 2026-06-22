@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 import structlog
 import uvicorn
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from jose import JWTError
@@ -23,17 +27,42 @@ from routers import auth, cron, leaves, logs, rewards, schedules, users, webhook
 
 logger = structlog.get_logger(__name__)
 
+# Resolve alembic.ini relative to this file so it works regardless of cwd
+_ALEMBIC_INI = Path(__file__).parent.parent / "alembic.ini"
+
+
+def _run_migrations() -> None:
+    """Run any pending Alembic migrations synchronously.
+
+    Called once during application startup before the server starts
+    accepting requests.  Safe to run on every start — Alembic is a no-op
+    when the database is already at ``head``.
+    """
+    cfg = AlembicConfig(str(_ALEMBIC_INI))
+    # Ensure the versions directory is resolved relative to alembic.ini, not cwd
+    cfg.set_main_option("script_location", str(_ALEMBIC_INI.parent / "alembic"))
+    alembic_command.upgrade(cfg, "head")
+    logger.info("startup.migrations_applied")
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Verify Supabase connectivity on startup."""
+    """Run migrations then verify Supabase connectivity on startup."""
+    # ── 1. Auto-migrate ───────────────────────────────────────────────────────
+    try:
+        _run_migrations()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("startup.migrations_failed", error=str(exc))
+        # Don't crash the server — log and continue so the app stays debuggable
+
+    # ── 2. Supabase health-check ──────────────────────────────────────────────
     try:
         db = await get_supabase()
-        # Lightweight health-check: list tables in public schema
         await db.table("users").select("id").limit(1).execute()
         logger.info("startup.supabase_connected")
     except Exception as exc:  # noqa: BLE001
         logger.error("startup.supabase_failed", error=str(exc))
+
     yield
     logger.info("shutdown.complete")
 

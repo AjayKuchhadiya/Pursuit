@@ -1,26 +1,40 @@
-name: Daily Pursuit Check-In Ping
+name: Pursuit Daily Pings
 
 on:
   schedule:
-    # 15:30 UTC = 9:00 PM IST (UTC+5:30)
-    - cron: "30 15 * * *"
-  # Allow manual trigger from GitHub Actions UI for testing
+    # Run every 30 minutes — cron endpoints filter by user's configured time
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 jobs:
-  ping:
-    name: Send daily check-in messages
+  morning-ping:
+    name: Morning agenda
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger daily ping endpoint
+      - name: Trigger morning-ping endpoint
         run: |
           STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
             --max-time 30 \
-            -X POST "${{ secrets.API_BASE_URL }}/cron/daily-ping" \
+            -X POST "${{ secrets.API_BASE_URL }}/cron/morning-ping" \
             -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}")
-
           echo "HTTP status: $STATUS"
           if [ "$STATUS" != "200" ]; then
-            echo "::error::Daily ping failed with HTTP $STATUS"
+            echo "::error::Morning ping failed with HTTP $STATUS"
+            exit 1
+          fi
+
+  evening-ping:
+    name: Evening check-in
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger evening-ping endpoint
+        run: |
+          STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+            --max-time 30 \
+            -X POST "${{ secrets.API_BASE_URL }}/cron/evening-ping" \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Evening ping failed with HTTP $STATUS"
             exit 1
           fi

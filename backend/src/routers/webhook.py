@@ -84,12 +84,17 @@ async def receive_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # typ
     button_id: str = message["interactive"]["button_reply"]["id"]
     logger.info("webhook.button_tap", button_id=button_id, from_=phone)
 
-    # Map button → completion_pct / is_casual_leave
-    if button_id == whatsapp.BUTTON_ID_DONE:
+    # Button ID format: "<action>:<schedule_id>"  e.g. "log_100:abc-uuid"
+    # Also accept legacy format without schedule_id for Swagger testing
+    parts = button_id.split(":", 1)
+    action = parts[0]
+    schedule_id_from_button: str | None = parts[1] if len(parts) == 2 else None
+
+    if action == whatsapp.BUTTON_ID_DONE:
         completion_pct, is_cl = 100, False
-    elif button_id == whatsapp.BUTTON_ID_HALFWAY:
+    elif action == whatsapp.BUTTON_ID_HALFWAY:
         completion_pct, is_cl = 50, False
-    elif button_id == whatsapp.BUTTON_ID_CASUAL_LEAVE:
+    elif action == whatsapp.BUTTON_ID_CASUAL_LEAVE:
         completion_pct, is_cl = 0, True
     else:
         logger.warning("webhook.unknown_button", button_id=button_id)
@@ -115,15 +120,27 @@ async def receive_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # typ
     user_id: str = user["id"]
     personality: str = user["personality"]
 
-    # Fetch active schedule
-    sched_res = (
-        await db.table("schedules")
-        .select("id")
-        .eq("user_id", user_id)
-        .eq("is_active", True)
-        .limit(1)
-        .execute()
-    )
+    # Resolve schedule_id: prefer the one encoded in the button, else fallback to first active
+    if schedule_id_from_button:
+        sched_res = (
+            await db.table("schedules")
+            .select("id")
+            .eq("id", schedule_id_from_button)
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+    else:
+        sched_res = (
+            await db.table("schedules")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+
     if not sched_res.data:
         await whatsapp.send_text_message(
             phone,
