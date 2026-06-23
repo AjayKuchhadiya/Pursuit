@@ -14,7 +14,7 @@ from schemas.auth import OtpRequestBody, OtpVerifyBody, TokenResponse
 from services import otp as otp_svc
 from services import whatsapp
 
-OTP_TTL_MINUTES = 5
+OTP_TTL_MINUTES = 10
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = structlog.get_logger(__name__)
@@ -45,8 +45,33 @@ async def request_otp(body: OtpRequestBody, db: SupabaseDep) -> dict:  # type: i
             detail="Failed to send OTP via WhatsApp. Please try again.",
         ) from exc
 
+    # In development, print OTP to server console so you can test
+    # without needing the 24-hour WhatsApp conversation window.
+    from config import settings as _settings
+    if _settings.app_env == "development":
+        logger.warning("auth.otp_dev_peek", phone=body.phone_number, otp=code)
+
     logger.info("auth.otp_requested", phone=body.phone_number)
-    return {"detail": "OTP sent to your WhatsApp number."}
+
+    from config import settings as _settings  # noqa: PLC0415
+    response: dict = {"detail": "OTP sent to your WhatsApp number."}
+
+    # If the bot number is configured, tell the frontend so it can show
+    # an onboarding prompt for users who haven't texted the bot yet.
+    if _settings.meta_bot_whatsapp_number:
+        response["onboarding"] = {
+            "required_if_new_user": True,
+            "instruction": (
+                f"If you don't receive the OTP within 30 seconds, "
+                f"send any message to {_settings.meta_bot_whatsapp_number} "
+                "on WhatsApp first, then tap 'Resend'."
+            ),
+            "whatsapp_url": (
+                f"https://wa.me/{_settings.meta_bot_whatsapp_number.replace(' ', '').replace('+', '')}"
+            ),
+        }
+
+    return response
 
 
 @router.post("/otp/verify", response_model=TokenResponse)

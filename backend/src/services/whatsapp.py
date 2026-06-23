@@ -42,10 +42,16 @@ async def send_text_message(phone: str, body: str) -> None:
 
 
 async def send_otp_message(phone: str, otp: str) -> None:
-    """Send the OTP code as a plain-text message."""
+    """Send the OTP code as a plain-text WhatsApp message.
+
+    NOTE: Free-form messages only deliver within the 24-hour conversation
+    window (Meta test account limitation).  Once the business is verified
+    and a real WABA is connected, switch this to an authentication template
+    to remove the window restriction.
+    """
     body = (
-        f"🔐 Your Pursuit verification code is: *{otp}*\n\n"
-        "This code expires in 5 minutes. Do not share it with anyone."
+        f"\U0001f510 Your Pursuit verification code is: *{otp}*\n\n"
+        "This code expires in 10 minutes. Do not share it with anyone."
     )
     await send_text_message(phone, body)
 
