@@ -1,5 +1,6 @@
 """Entry point: uv run run.py"""
 
+import os
 import sys
 from pathlib import Path
 
@@ -11,9 +12,12 @@ import uvicorn
 if __name__ == "__main__":
     from config import settings
 
+    # Render (and other PaaS hosts) inject a PORT env var.
+    port = int(os.environ.get("PORT", 8000))
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",  # noqa: S104
-        port=8000,
+        port=port,
         reload=settings.app_env == "development",
     )
