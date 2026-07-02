@@ -12,7 +12,7 @@ message users whose configured time falls within the current 30-minute window
 from __future__ import annotations
 
 import zoneinfo
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 import structlog
 from fastapi import APIRouter, Header, HTTPException, status
@@ -71,10 +71,10 @@ async def morning_ping(
         phone: str = user["phone_number"]
         tz: str = user.get("timezone") or "Asia/Kolkata"
 
-        # Fetch all active schedules for this user, filter by morning_time window
+        # Fetch all active schedules for this user
         sched_res = (
             await db.table("schedules")
-            .select("id, title, morning_time")
+            .select("id, title, morning_time, days_of_week")
             .eq("user_id", user_id)
             .eq("is_active", True)
             .execute()
@@ -83,14 +83,26 @@ async def morning_ping(
         if not schedules:
             continue
 
-        # Check if any schedule's morning_time is in window (use first schedule's time)
-        # All schedules belonging to a user share the same send-window check
-        first_time_str: str = schedules[0].get("morning_time") or "08:00"
-        h, m = map(int, first_time_str.split(":")[:2])
-        if not _in_window(time(h, m), tz):
+        # Determine today's weekday in the user's timezone (0=Mon … 6=Sun)
+        try:
+            tz_obj = zoneinfo.ZoneInfo(tz)
+        except zoneinfo.ZoneInfoNotFoundError:
+            tz_obj = zoneinfo.ZoneInfo("Asia/Kolkata")
+        today_weekday = datetime.now(tz_obj).weekday()
+
+        # Keep only schedules active today and within the morning_time window
+        due = [
+            s for s in schedules
+            if today_weekday in (s.get("days_of_week") or list(range(7)))
+            and _in_window(
+                time(*map(int, (s.get("morning_time") or "08:00").split(":")[:2])),
+                tz,
+            )
+        ]
+        if not due:
             continue
 
-        titles = [s["title"] for s in schedules]
+        titles = [s["title"] for s in due]
         try:
             await whatsapp.send_morning_agenda(phone=phone, schedules=titles)
             sent += 1
@@ -116,7 +128,6 @@ async def evening_ping(
     """
     _guard(x_cron_secret)
 
-    from datetime import date
     today = date.today().isoformat()
 
     users_res = (
@@ -135,7 +146,7 @@ async def evening_ping(
 
         sched_res = (
             await db.table("schedules")
-            .select("id, title, evening_time")
+            .select("id, title, evening_time, days_of_week")
             .eq("user_id", user_id)
             .eq("is_active", True)
             .execute()
@@ -143,6 +154,13 @@ async def evening_ping(
         schedules = sched_res.data or []
         if not schedules:
             continue
+
+        # Today's weekday in user's timezone
+        try:
+            tz_obj = zoneinfo.ZoneInfo(tz)
+        except zoneinfo.ZoneInfoNotFoundError:
+            tz_obj = zoneinfo.ZoneInfo("Asia/Kolkata")
+        today_weekday = datetime.now(tz_obj).weekday()
 
         bal_res = (
             await db.table("leave_balance")
@@ -157,6 +175,11 @@ async def evening_ping(
             schedule_id: str = schedule["id"]
             evening_time_str: str = schedule.get("evening_time") or "21:00"
             h, m = map(int, evening_time_str.split(":")[:2])
+
+            # Skip if not scheduled for today
+            days = schedule.get("days_of_week") or list(range(7))
+            if today_weekday not in days:
+                continue
 
             if not _in_window(time(h, m), tz):
                 continue

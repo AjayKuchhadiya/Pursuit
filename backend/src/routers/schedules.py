@@ -27,7 +27,14 @@ async def create_schedule(
 ) -> ScheduleRead:
     res = (
         await db.table("schedules")
-        .insert({"user_id": user["id"], "title": body.title, "is_active": body.is_active})
+        .insert({
+            "user_id": user["id"],
+            "title": body.title,
+            "is_active": body.is_active,
+            "morning_time": body.morning_time,
+            "evening_time": body.evening_time,
+            "days_of_week": body.days_of_week,
+        })
         .select("*")
         .execute()
     )

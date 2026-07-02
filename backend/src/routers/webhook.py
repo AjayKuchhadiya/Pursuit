@@ -63,6 +63,18 @@ class WebhookPayload(BaseModel):
 async def receive_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # type: ignore[type-arg]
     """Parse Meta's webhook payload and process interactive button replies."""
     try:
+        return await _process_webhook(body, db)
+    except Exception as exc:
+        logger.error(
+            "webhook.unhandled_error",
+            error=str(exc),
+            traceback=__import__("traceback").format_exc(),
+        )
+        raise
+
+
+async def _process_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # type: ignore[type-arg]
+    try:
         payload = body.model_dump()
     except Exception:
         return {"status": "ignored"}
