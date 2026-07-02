@@ -49,11 +49,18 @@ def _run_migrations() -> None:
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Run migrations then verify Supabase connectivity on startup."""
     # ── 1. Auto-migrate ───────────────────────────────────────────────────────
-    try:
-        _run_migrations()
-    except Exception as exc:  # noqa: BLE001
-        logger.error("startup.migrations_failed", error=str(exc))
-        # Don't crash the server — log and continue so the app stays debuggable
+    # Skipped in production: Supabase's pooler requires a direct TCP connection
+    # that isn't reliably available on all hosting platforms. Apply migrations
+    # manually via `alembic upgrade head` locally or via Supabase Dashboard →
+    # SQL Editor when deploying schema changes to production.
+    if settings.app_env != "production":
+        try:
+            _run_migrations()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("startup.migrations_failed", error=str(exc))
+            # Don't crash the server — log and continue so the app stays debuggable
+    else:
+        logger.info("startup.migrations_skipped", reason="production environment")
 
     # ── 2. Supabase health-check ──────────────────────────────────────────────
     try:
