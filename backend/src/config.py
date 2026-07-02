@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     supabase_anon_key: str
     supabase_service_role_key: str
 
+    # ── Database (Alembic) ────────────────────────────────────────────────────
+    database_url: str
+
     # ── JWT ───────────────────────────────────────────────────────────────────
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
@@ -34,6 +37,13 @@ class Settings(BaseSettings):
     meta_phone_number_id: str
     meta_whatsapp_api_version: str = "v19.0"
     meta_webhook_verify_token: str
+    # Exact name of the approved authentication template in Meta Business Manager
+    meta_otp_template_name: str = "pursuit_otp"
+    meta_otp_template_language: str = "en"
+
+    # Human-readable phone number users text to open the 24-hour window
+    # e.g. "+1 415 523 8886" (WhatsApp sandbox) or your real business number
+    meta_bot_whatsapp_number: str = ""
 
     # ── Cron ──────────────────────────────────────────────────────────────────
     cron_secret: str

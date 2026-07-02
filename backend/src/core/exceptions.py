@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import traceback
+
+import structlog
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from jose import JWTError
+
+logger = structlog.get_logger(__name__)
 
 
 class AppError(Exception):
@@ -26,5 +31,12 @@ async def jwt_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
 
 
-async def generic_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error(
+        "unhandled_exception",
+        method=request.method,
+        path=request.url.path,
+        error=str(exc),
+        traceback=traceback.format_exc(),
+    )
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
