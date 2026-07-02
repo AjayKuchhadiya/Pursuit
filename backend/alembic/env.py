@@ -36,7 +36,9 @@ if not database_url:
         "DATABASE_URL is not set. Add it to your .env file.\n"
         "Format: postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres"
     )
-config.set_main_option("sqlalchemy.url", database_url)
+# configparser uses % for interpolation, so percent-encoded characters in the
+# URL (e.g. %24 for $, %2B for +) must be escaped as %% before being stored.
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:
