@@ -1,0 +1,81 @@
+# render.yaml — Render Blueprint
+# https://render.com/docs/blueprint-spec
+#
+# Deploy steps:
+#   1. Push this file to your repo's default branch.
+#   2. In Render Dashboard → New → Blueprint, connect your GitHub repo.
+#   3. Render will detect this file and create the service automatically.
+#   4. Fill in every env var marked sync: false in the Render dashboard
+#      before (or immediately after) your first deploy.
+
+services:
+  - type: web
+    name: pursuit-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+
+    envVars:
+      # ── Python path ─────────────────────────────────────────────────────
+      - key: PYTHONPATH
+        value: src
+
+      # ── App ─────────────────────────────────────────────────────────────
+      - key: APP_ENV
+        value: production
+      # Comma-separated list of allowed CORS origins (your frontend URL).
+      # Example: https://pursuit.example.com
+      - key: CORS_ORIGINS
+        sync: false
+
+      # ── Supabase ─────────────────────────────────────────────────────────
+      # Find these in: Supabase Dashboard → Project Settings → API
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # ── Database (Alembic migrations) ────────────────────────────────────
+      # Supabase Dashboard → Project Settings → Database → Connection string → URI
+      # Use the direct connection (port 5432), NOT the pooler.
+      - key: DATABASE_URL
+        sync: false
+
+      # ── JWT ──────────────────────────────────────────────────────────────
+      # Generate a strong secret: python -c "import secrets; print(secrets.token_hex(32))"
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_ACCESS_TOKEN_EXPIRE_DAYS
+        value: "7"
+
+      # ── Meta WhatsApp Cloud API ───────────────────────────────────────────
+      # Meta App Dashboard → WhatsApp → API Setup
+      - key: META_ACCESS_TOKEN
+        sync: false
+      - key: META_PHONE_NUMBER_ID
+        sync: false
+      - key: META_WHATSAPP_API_VERSION
+        value: v19.0
+      # Must match the Verify Token you enter in Meta App Dashboard → Webhooks
+      - key: META_WEBHOOK_VERIFY_TOKEN
+        sync: false
+      # Name of the approved OTP message template in Meta Business Manager
+      - key: META_OTP_TEMPLATE_NAME
+        value: pursuit_otp
+      - key: META_OTP_TEMPLATE_LANGUAGE
+        value: en
+      # Human-readable WhatsApp number users text first to open the 24-hr window
+      # Example: +14155238886 (Twilio sandbox) or your real business number
+      - key: META_BOT_WHATSAPP_NUMBER
+        sync: false
+
+      # ── Cron security ─────────────────────────────────────────────────────
+      # Must match the CRON_SECRET secret set in GitHub Actions
+      - key: CRON_SECRET
+        sync: false
