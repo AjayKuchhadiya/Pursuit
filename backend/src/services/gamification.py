@@ -53,15 +53,16 @@ async def process_log(
     4. Check reward milestones.
     5. Return :class:`GameResult`.
     """
-    # ── 1. Insert log ─────────────────────────────────────────────────────────
-    await db.table("daily_logs").insert(
+    # ── 1. Upsert log (update if already logged today) ───────────────────────
+    await db.table("daily_logs").upsert(
         {
             "user_id": user_id,
             "schedule_id": schedule_id,
             "log_date": log_date.isoformat(),
             "completion_pct": completion_pct,
             "is_casual_leave": is_casual_leave,
-        }
+        },
+        on_conflict="user_id,schedule_id,log_date",
     ).execute()
 
     # ── 2. Fetch current streak & CL balance ──────────────────────────────────
@@ -83,6 +84,15 @@ async def process_log(
 
     streak_saved_by_cl = False
     cl_earned = False
+
+    # Streak should only change once per day — skip gamification if already processed today
+    already_today = streak_row.get("last_active_date") == log_date.isoformat()
+    if already_today:
+        return GameResult(
+            current_streak=current_streak,
+            all_time_high=all_time_high,
+            cl_balance=cl_balance,
+        )
 
     # ── 3. Apply rules ────────────────────────────────────────────────────────
     if is_casual_leave:
