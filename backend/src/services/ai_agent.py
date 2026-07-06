@@ -125,8 +125,11 @@ Today's tasks: {', '.join(schedules)}
 
 Write a morning check-in message (2-4 sentences).
 - Reference their streak and specific tasks naturally.
-- End with the numbered task list.
-No hashtags. No markdown bold/italic. Plain text + emojis only."""
+- End with the numbered task list formatted as:
+  1. Task name
+  2. Task name
+Use WhatsApp formatting: *bold* for key words, _italic_ sparingly. Use line breaks generously between sections.
+No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
     client = _get_client()
     try:
@@ -158,10 +161,11 @@ Skip Days left: {cl_balance:.1f}
 Today's tasks: {', '.join(schedules)}
 
 Write the body of an evening check-in card (2-3 sentences).
-- List the tasks
+- List each task as a bullet: • Task name
 - Ask how it went
 - Mention they can also reply in plain text for a more detailed response
-No hashtags. No markdown. Plain text + emojis."""
+Use WhatsApp formatting: *bold* for task names or key phrases. Use line breaks between sections.
+No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
     client = _get_client()
     try:
@@ -208,9 +212,11 @@ Missed (0%): {missed or 'none'}
 {chr(10).join(extras)}
 
 Write a short reply (2-4 sentences). Be specific about what they did.
+- If there are completed/partial/missed tasks, list them with bullets (✅ done, 🔄 partial, ❌ missed).
 {"Acknowledge the Skip Day." if streak_saved else ""}
 {"Celebrate the bonus Skip Day!" if cl_earned else ""}
-No hashtags. No markdown. Plain text + emojis."""
+Use WhatsApp formatting: *bold* for the streak count and task names. Use line breaks between sections.
+No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
     client = _get_client()
     try:
@@ -250,11 +256,14 @@ Weekly report for {user_name}:
 - Average completion: {avg:.0f}%
 - Full (100%): {full}  |  Partial (50%): {partial}  |  Missed (0%): {missed}
 
-Write a weekly summary (4-6 sentences).
-- Highlight the biggest win
-- Call out one pattern to watch
-- Give one concrete tip for next week
-No hashtags. No markdown. Plain text + emojis."""
+Write a weekly summary structured as:
+- 1 opening sentence with overall vibe
+- *This week's wins:* followed by bullet points (• ...)
+- *Watch out for:* one pattern to improve
+- *Tip for next week:* one concrete actionable tip
+
+Use WhatsApp formatting: *bold* for section labels and key numbers, • for bullets. Use line breaks between each section.
+No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
     client = _get_client()
     try:
@@ -318,8 +327,12 @@ Active tasks:
 
 User's question: "{user_text}"
 
-Answer helpfully in 2-3 sentences. If they ask about tasks, list them clearly.
-No hashtags. No markdown. Plain text + emojis."""
+Answer helpfully in 2-3 sentences. If they ask about tasks, list them as:
+  1. *Task name*
+  2. *Task name*
+If they ask about streak or stats, *bold* the numbers.
+Use WhatsApp formatting: *bold* for emphasis, • for bullet lists. Use line breaks between sections.
+No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
     client = _get_client()
     try:
