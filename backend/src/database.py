@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, TypeAlias
 
 from fastapi import Depends
 from supabase._async.client import AsyncClient, create_client
@@ -28,4 +28,4 @@ async def get_supabase() -> AsyncClient:
 
 
 # Convenience type alias for route dependencies
-SupabaseDep = Annotated[AsyncClient, Depends(get_supabase)]
+SupabaseDep: TypeAlias = Annotated[AsyncClient, Depends(get_supabase)]
