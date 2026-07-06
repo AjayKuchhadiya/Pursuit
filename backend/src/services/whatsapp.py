@@ -98,7 +98,7 @@ async def send_interactive_checkin(
             "body": {
                 "text": (
                     f'How much progress today on *"{schedule_title}"*?\n\n'
-                    f"Casual Leaves left: *{cl_balance:.1f} CLs* 🛋️"
+                    f"Skip Days left: *{cl_balance:.1f}* 🛋️"
                 ),
             },
             "action": {
@@ -121,7 +121,7 @@ async def send_interactive_checkin(
                         "type": "reply",
                         "reply": {
                             "id": f"apply_cl:{schedule_id}",
-                            "title": "Casual Leave 🛋️",
+                            "title": "Skip Day 🛋️",
                         },
                     },
                 ],

@@ -49,7 +49,7 @@ class WebhookPayload(BaseModel):
     ```json
     {"entry":[{"changes":[{"value":{"messages":[{"from":"+917457878864","type":"interactive","interactive":{"button_reply":{"id":"log_50"}}}]}}]}]}
     ```
-    Apply Casual Leave:
+    Apply Skip Day:
     ```json
     {"entry":[{"changes":[{"value":{"messages":[{"from":"+917457878864","type":"interactive","interactive":{"button_reply":{"id":"apply_cl"}}}]}}]}]}
     ```
@@ -177,7 +177,7 @@ async def _process_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # ty
         if balance < 1.0:
             await whatsapp.send_text_message(
                 phone,
-                "❌ You don't have any Casual Leaves left! Earn more by completing 7-day streaks.",
+                "❌ You don't have any Skip Days left! Earn more by completing 7-day streaks.",
             )
             return {"status": "no_cl_balance"}
 

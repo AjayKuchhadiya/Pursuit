@@ -17,6 +17,7 @@ class Personality(StrEnum):
 class UserUpdate(BaseModel):
     personality: Personality | None = None
     timezone: str | None = None
+    name: str | None = None
 
     @field_validator("timezone")
     @classmethod
@@ -35,6 +36,7 @@ class UserUpdate(BaseModel):
 class UserRead(BaseModel):
     id: UUID
     phone_number: str
+    name: str
     personality: Personality
     timezone: str
     is_active: bool
