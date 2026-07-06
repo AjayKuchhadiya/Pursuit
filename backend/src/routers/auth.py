@@ -67,7 +67,7 @@ async def request_otp(body: OtpRequestBody, db: SupabaseDep) -> dict:  # type: i
                 "on WhatsApp first, then tap 'Resend'."
             ),
             "whatsapp_url": (
-                f"https://wa.me/{_settings.meta_bot_whatsapp_number.replace(' ', '').replace('+', '')}"
+                f"https://wa.me/{''.join(c for c in _settings.meta_bot_whatsapp_number if c.isdigit())}"
             ),
         }
 
