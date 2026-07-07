@@ -33,6 +33,12 @@ async def update_me(body: UserUpdate, db: SupabaseDep, user: CurrentUser) -> Use
     return UserRead(**res.data[0])
 
 
+@router.delete("/me", status_code=204)
+async def delete_me(db: SupabaseDep, user: CurrentUser) -> None:
+    """Permanently delete the authenticated user's account and all associated data."""
+    await db.table("users").delete().eq("id", user["id"]).execute()
+
+
 @router.get("/me/stats")
 async def get_stats(db: SupabaseDep, user: CurrentUser) -> dict:  # type: ignore[type-arg]
     """Return streak info and CL balance for the dashboard header."""

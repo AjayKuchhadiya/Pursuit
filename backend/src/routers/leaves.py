@@ -1,11 +1,13 @@
-"""Casual Leave router."""
+"""Skip Day router."""
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from typing import Optional
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 
 from database import SupabaseDep
 from dependencies import CurrentUser
@@ -13,6 +15,10 @@ from services import gamification
 
 router = APIRouter(prefix="/leaves", tags=["leaves"])
 logger = structlog.get_logger(__name__)
+
+
+class ApplyLeaveBody(BaseModel):
+    log_date: Optional[date] = None  # defaults to today if omitted
 
 
 @router.get("")
@@ -29,23 +35,24 @@ async def get_leave_balance(db: SupabaseDep, user: CurrentUser) -> dict:  # type
 
 
 @router.post("/apply", status_code=status.HTTP_200_OK)
-async def apply_casual_leave(db: SupabaseDep, user: CurrentUser) -> dict:  # type: ignore[type-arg]
-    """Apply a Casual Leave for today from the dashboard (outside the WhatsApp flow)."""
+async def apply_casual_leave(body: ApplyLeaveBody, db: SupabaseDep, user: CurrentUser) -> dict:  # type: ignore[type-arg]
+    """Apply a Skip Day for the given date (defaults to today) from the dashboard."""
     user_id: str = user["id"]
 
+    target_date = body.log_date or date.today()
+
     # Guard: only one log per day
-    today = date.today()
     existing = (
         await db.table("daily_logs")
         .select("id")
         .eq("user_id", user_id)
-        .eq("log_date", today.isoformat())
+        .eq("log_date", target_date.isoformat())
         .execute()
     )
     if existing.data:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A log for today already exists.",
+            detail=f"A log for {target_date.isoformat()} already exists.",
         )
 
     # Fetch active schedule
@@ -74,19 +81,19 @@ async def apply_casual_leave(db: SupabaseDep, user: CurrentUser) -> dict:  # typ
     if balance < 1.0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Insufficient Casual Leave balance.",
+            detail="Insufficient Skip Day balance.",
         )
 
     result = await gamification.process_log(
         db=db,
         user_id=user_id,
         schedule_id=sched_res.data[0]["id"],
-        log_date=today,
+        log_date=target_date,
         completion_pct=0,
         is_casual_leave=True,
     )
     return {
-        "detail": "Casual Leave applied. Your streak is protected! 🛋️",
+        "detail": f"Skip Day applied for {target_date.isoformat()}. Your streak is protected! 🛋️",
         "cl_balance": result.cl_balance,
         "current_streak": result.current_streak,
     }

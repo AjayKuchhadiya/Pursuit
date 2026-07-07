@@ -67,7 +67,7 @@ async def request_otp(body: OtpRequestBody, db: SupabaseDep) -> dict:  # type: i
                 "on WhatsApp first, then tap 'Resend'."
             ),
             "whatsapp_url": (
-                f"https://wa.me/{_settings.meta_bot_whatsapp_number.replace(' ', '').replace('+', '')}"
+                f"https://wa.me/{''.join(c for c in _settings.meta_bot_whatsapp_number if c.isdigit())}"
             ),
         }
 
@@ -106,22 +106,33 @@ async def verify_otp(body: OtpVerifyBody, db: SupabaseDep) -> TokenResponse:
     # Mark OTP as used
     await db.table("otp_sessions").update({"is_used": True}).eq("id", session["id"]).execute()
 
-    # Upsert user
-    user_result = (
+    # Upsert user — check existence first so we never overwrite existing data
+    existing_res = (
         await db.table("users")
-        .upsert(
-            {
-                "phone_number": body.phone_number,
-                "personality": "analyst",
-                "timezone": "Asia/Kolkata",
-                "is_active": True,
-            },
-            on_conflict="phone_number",
-        )
         .select("id")
+        .eq("phone_number", body.phone_number)
+        .limit(1)
         .execute()
     )
-    user_id: str = user_result.data[0]["id"]
+    if existing_res.data:
+        user_id: str = existing_res.data[0]["id"]
+        is_new_user = False
+    else:
+        insert_res = (
+            await db.table("users")
+            .insert(
+                {
+                    "phone_number": body.phone_number,
+                    "personality": "analyst",
+                    "timezone": "Asia/Kolkata",
+                    "is_active": True,
+                }
+            )
+            .select("id")
+            .execute()
+        )
+        user_id = insert_res.data[0]["id"]
+        is_new_user = True
 
     # Ensure leave_balance row exists
     await db.table("leave_balance").upsert(
@@ -131,5 +142,5 @@ async def verify_otp(body: OtpVerifyBody, db: SupabaseDep) -> TokenResponse:
     ).execute()
 
     token = create_access_token(user_id)
-    logger.info("auth.otp_verified", user_id=user_id)
-    return TokenResponse(access_token=token)
+    logger.info("auth.otp_verified", user_id=user_id, is_new_user=is_new_user)
+    return TokenResponse(access_token=token, is_new_user=is_new_user)

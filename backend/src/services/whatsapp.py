@@ -98,7 +98,7 @@ async def send_interactive_checkin(
             "body": {
                 "text": (
                     f'How much progress today on *"{schedule_title}"*?\n\n'
-                    f"Casual Leaves left: *{cl_balance:.1f} CLs* 🛋️"
+                    f"Skip Days left: *{cl_balance:.1f}* 🛋️"
                 ),
             },
             "action": {
@@ -121,7 +121,7 @@ async def send_interactive_checkin(
                         "type": "reply",
                         "reply": {
                             "id": f"apply_cl:{schedule_id}",
-                            "title": "Casual Leave 🛋️",
+                            "title": "Skip Day 🛋️",
                         },
                     },
                 ],
@@ -133,3 +133,34 @@ async def send_interactive_checkin(
         resp = await client.post(url, json=payload, headers=_headers())
         resp.raise_for_status()
     logger.info("whatsapp.checkin_sent", to=phone, schedule=schedule_title)
+
+
+async def send_consolidated_evening_checkin(phone: str, body_text: str) -> None:
+    """Send ONE evening check-in card covering all of today's tasks.
+
+    Buttons log for *all* active schedules at once (ID suffix ':all').
+    Users can also ignore the buttons and reply in plain text — the webhook
+    will parse their free-text response via the AI agent.
+    """
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "header": {"type": "text", "text": "📅 Pursuit Evening Check-In"},
+            "body": {"text": body_text},
+            "action": {
+                "buttons": [
+                    {"type": "reply", "reply": {"id": "log_100:all", "title": "All Done ✅"}},
+                    {"type": "reply", "reply": {"id": "log_50:all",  "title": "Partial 🔥"}},
+                    {"type": "reply", "reply": {"id": "log_0:all",   "title": "Missed 😔"}},
+                ],
+            },
+        },
+    }
+    url = f"{settings.meta_api_base_url}/{settings.meta_phone_number_id}/messages"
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(url, json=payload, headers=_headers())
+        resp.raise_for_status()
+    logger.info("whatsapp.consolidated_checkin_sent", to=phone)

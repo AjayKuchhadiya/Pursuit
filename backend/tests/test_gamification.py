@@ -45,7 +45,7 @@ def test_drill_sergeant_response_below_threshold():
 def test_analyst_response_casual_leave():
     result = make_result(streak_saved_by_cl=True, current_streak=3, cl_balance=2.0)
     msg = get_response_message("analyst", 0, result)
-    assert "frozen" in msg.lower() or "casual leave" in msg.lower()
+    assert "frozen" in msg.lower() or "skip day" in msg.lower()
 
 
 def test_cl_earned_message_included():

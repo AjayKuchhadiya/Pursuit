@@ -19,19 +19,19 @@ def get_checkin_message(personality: str, schedule_title: str, cl_balance: float
         return (
             f"Hey superstar! 🌟 Time for your daily check-in on *{schedule_title}*!\n"
             f"Remember, every tiny step counts. You've got this! 💪\n\n"
-            f"Casual Leaves remaining: *{cl_balance:.1f} CLs* 🛋️"
+            f"Skip Days remaining: *{cl_balance:.1f}* 🛋️"
         )
     if p == "drill_sergeant":
         return (
-            f"ATTENTION! 🪖 Daily check-in for *{schedule_title}*.\n"
+            f"ATTENTION! \ud83e\ude96 Daily check-in for *{schedule_title}*.\n"
             f"No excuses. No delays. LOG. YOUR. PROGRESS. NOW.\n\n"
-            f"Casual Leaves remaining: *{cl_balance:.1f} CLs* 🛋️"
+            f"Skip Days remaining: *{cl_balance:.1f}* \ud83d\udecb\ufe0f"
         )
     # Default: analyst
     return (
         f"Good evening. Daily check-in for schedule: *{schedule_title}*.\n"
         f"Please log your completion percentage below.\n\n"
-        f"Casual Leaves remaining: *{cl_balance:.1f} CLs* 🛋️"
+        f"Skip Days remaining: *{cl_balance:.1f}* \ud83d\udecb\ufe0f"
     )
 
 
@@ -43,16 +43,16 @@ def get_response_message(personality: str, completion_pct: int, result: GameResu
         if p == "cheerleader":
             return (
                 "Taking a well-deserved break! 🛋️ Your streak is SAFE and sound. "
-                f"CL balance: *{result.cl_balance:.1f}*. Rest up, you're back tomorrow! 💛"
+                f"Skip Day balance: *{result.cl_balance:.1f}*. Rest up, you're back tomorrow! 💛"
             )
         if p == "drill_sergeant":
             return (
-                f"🛋️ CL used. Streak frozen at *{result.current_streak}*. "
+                f"🛋️ Skip Day used. Streak frozen at *{result.current_streak}*. "
                 "Don't make this a habit. Back in full force tomorrow. 🪖"
             )
         return (
-            f"Casual Leave applied. Streak frozen at *{result.current_streak}*. "
-            f"Remaining balance: *{result.cl_balance:.1f} CLs*."
+            f"Skip Day applied. Streak frozen at *{result.current_streak}*. "
+            f"Remaining balance: *{result.cl_balance:.1f}*."
         )
 
     if completion_pct >= 80:

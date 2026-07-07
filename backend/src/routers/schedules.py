@@ -11,7 +11,7 @@ from database import SupabaseDep
 from dependencies import CurrentUser
 from schemas.schedule import ScheduleCreate, ScheduleRead, ScheduleUpdate
 
-router = APIRouter(prefix="/schedules", tags=["schedules"])
+router = APIRouter(prefix="/goals", tags=["goals"])
 logger = structlog.get_logger(__name__)
 
 
