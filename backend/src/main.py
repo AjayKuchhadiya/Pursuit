@@ -23,7 +23,7 @@ from core.exceptions import (
     jwt_error_handler,
 )
 from database import get_supabase
-from routers import auth, cron, leaves, logs, rewards, schedules, users, webhook
+from routers import auth, cron, health, leaves, logs, rewards, schedules, users, webhook
 
 logger = structlog.get_logger(__name__)
 
@@ -100,6 +100,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(Exception, generic_error_handler)  # type: ignore[arg-type]
 
     # ── Routers ───────────────────────────────────────────────────────────────
+    app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(webhook.router)
     app.include_router(schedules.router)
@@ -108,10 +109,6 @@ def create_app() -> FastAPI:
     app.include_router(rewards.router)
     app.include_router(users.router)
     app.include_router(cron.router)
-
-    @app.get("/health", tags=["health"])
-    async def health() -> dict:  # type: ignore[type-arg]
-        return {"status": "ok"}
 
     return app
 
