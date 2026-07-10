@@ -23,4 +23,3 @@ jobs:
           if [ "$STATUS" != "200" ] && [ "$STATUS" != "000" ]; then
             echo "::warning::Health ping returned HTTP $STATUS"
           fi
-

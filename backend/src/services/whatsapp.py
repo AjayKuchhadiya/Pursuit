@@ -28,9 +28,11 @@ def _headers() -> dict[str, str]:
 
 async def send_text_message(phone: str, body: str) -> None:
     """Send a plain-text WhatsApp message to *phone* (E.164 format)."""
+    # Meta API expects the number without a leading '+'
+    to = phone.lstrip("+")
     payload = {
         "messaging_product": "whatsapp",
-        "to": phone,
+        "to": to,
         "type": "text",
         "text": {"body": body},
     }
@@ -85,9 +87,10 @@ async def send_interactive_checkin(
 
     Meta button IDs are limited to 256 chars and titles to 20 chars.
     """
+    to = phone.lstrip("+")
     payload = {
         "messaging_product": "whatsapp",
-        "to": phone,
+        "to": to,
         "type": "interactive",
         "interactive": {
             "type": "button",
@@ -142,9 +145,10 @@ async def send_consolidated_evening_checkin(phone: str, body_text: str) -> None:
     Users can also ignore the buttons and reply in plain text — the webhook
     will parse their free-text response via the AI agent.
     """
+    to = phone.lstrip("+")
     payload = {
         "messaging_product": "whatsapp",
-        "to": phone,
+        "to": to,
         "type": "interactive",
         "interactive": {
             "type": "button",
