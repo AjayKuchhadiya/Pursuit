@@ -1,40 +1,26 @@
-name: Pursuit Daily Pings
+name: Pursuit Keep-Alive
 
 on:
   schedule:
-    # Run every 30 minutes — cron endpoints filter by user's configured time
-    - cron: "*/30 * * * *"
+    # Ping every 14 minutes to prevent Render free tier from sleeping.
+    # Morning/evening WhatsApp messages are now handled by APScheduler
+    # running inside the FastAPI process (exact-minute delivery).
+    - cron: "*/14 * * * *"
   workflow_dispatch:
 
 jobs:
-  morning-ping:
-    name: Morning agenda
+  keep-alive:
+    name: Keep-alive ping
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger morning-ping endpoint
+      - name: Ping health endpoint
         run: |
           STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
             --max-time 30 \
-            -X POST "${{ secrets.API_BASE_URL }}/cron/morning-ping" \
-            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}")
+            "${{ secrets.API_BASE_URL }}/health")
           echo "HTTP status: $STATUS"
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::Morning ping failed with HTTP $STATUS"
-            exit 1
+          # 200 = healthy; 0 = app was sleeping and is now waking up (acceptable)
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "000" ]; then
+            echo "::warning::Health ping returned HTTP $STATUS"
           fi
 
-  evening-ping:
-    name: Evening check-in
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger evening-ping endpoint
-        run: |
-          STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-            --max-time 30 \
-            -X POST "${{ secrets.API_BASE_URL }}/cron/evening-ping" \
-            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}")
-          echo "HTTP status: $STATUS"
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::Evening ping failed with HTTP $STATUS"
-            exit 1
-          fi

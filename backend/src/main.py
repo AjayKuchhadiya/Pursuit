@@ -24,6 +24,7 @@ from core.exceptions import (
 )
 from database import get_supabase
 from routers import auth, cron, health, leaves, logs, rewards, schedules, users, webhook
+from services.scheduler import start_scheduler, stop_scheduler
 
 logger = structlog.get_logger(__name__)
 
@@ -70,7 +71,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # noqa: BLE001
         logger.error("startup.supabase_failed", error=str(exc))
 
+    # ── 3. Start background scheduler ────────────────────────────────────────
+    start_scheduler()
+
     yield
+
+    stop_scheduler()
     logger.info("shutdown.complete")
 
 
