@@ -262,7 +262,7 @@ async def _process_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # ty
 # ── Text reply handler ─────────────────────────────────────────────────────────
 
 async def _process_text_checkin(phone: str, text: str, db: SupabaseDep) -> dict:  # type: ignore[type-arg]
-    """Parse a free-text WhatsApp reply via AI and log per-schedule completions."""
+    """Route an incoming WhatsApp text through the conversational agent."""
     user_res = (
         await db.table("users").select("id, personality, name")
         .eq("phone_number", phone).limit(1).execute()
@@ -275,73 +275,31 @@ async def _process_text_checkin(phone: str, text: str, db: SupabaseDep) -> dict:
 
     user = user_res.data[0]
     user_id: str = user["id"]
-    personality: str = user["personality"]
-    user_name: str = user.get("name") or "there"
 
     sched_res = (
         await db.table("schedules").select("id, title")
         .eq("user_id", user_id).eq("is_active", True).execute()
     )
     schedules = sched_res.data or []
-    if not schedules:
-        await whatsapp.send_text_message(phone, "No active schedules found. Add one in the dashboard!")
-        return {"status": "no_schedule"}
 
-    logger.info("webhook.text_checkin", from_=phone, text_length=len(text))
+    logger.info("webhook.text_to_agent", from_=phone, text_length=len(text))
 
-    # ── Classify intent before treating as a check-in ────────────────────────
-    intent = await ai_agent.classify_message(text)
-
-    if intent == "query":
-        streak_res = await db.table("streaks").select("current_streak").eq("user_id", user_id).limit(1).execute()
-        streak = int(((streak_res.data or [{}])[0] or {}).get("current_streak", 0))
-        reply = await ai_agent.generate_query_reply(
-            user_text=text,
-            user_name=user_name,
-            streak=streak,
-            schedules=[s["title"] for s in schedules],
-            personality=personality,
+    try:
+        reply = await ai_agent.conversational_reply(
+            db=db,
+            user_id=user_id,
+            user=user,
+            text=text,
+            schedules=schedules,
         )
-        await whatsapp.send_text_message(phone, reply)
-        return {"status": "query_answered"}
-
-    if intent == "other":
-        await whatsapp.send_text_message(
-            phone,
-            f"Hey {user_name}! 👋 Send me your check-in update or tap the buttons from your evening ping.",
+    except Exception as exc:
+        logger.error(
+            "webhook.agent_failed",
+            error=str(exc),
+            traceback=__import__("traceback").format_exc(),
         )
-        return {"status": "non_checkin"}
+        name = user.get("name", "there")
+        reply = f"Hey {name}! 👋 I'm having a bit of trouble right now — could you try again in a moment?"
 
-    # intent == "checkin" → parse and log
-    parsed = await ai_agent.parse_checkin(
-        user_text=text, schedules=schedules, user_name=user_name
-    )
-
-    from datetime import date as _date3
-    results = []
-    last_result = None
-    for item in parsed:
-        try:
-            last_result = await gamification.process_log(
-                db=db, user_id=user_id, schedule_id=item["schedule_id"],
-                log_date=_date3.today(), completion_pct=item["completion_pct"], is_casual_leave=False,
-            )
-            results.append({"schedule_title": item["schedule_title"], "completion_pct": item["completion_pct"]})
-        except Exception as exc:
-            logger.error("webhook.text_log_failed", schedule_id=item.get("schedule_id"), error=str(exc))
-
-    if last_result is None:
-        await whatsapp.send_text_message(phone, "Got it! But I couldn't log anything — try again?")
-        return {"status": "log_failed"}
-
-    reply = await ai_agent.generate_checkin_reply(
-        user_name=user_name,
-        streak=last_result.current_streak,
-        results=results,
-        personality=personality,
-        cl_balance=last_result.cl_balance,
-        streak_saved=last_result.streak_saved_by_cl,
-        cl_earned=last_result.cl_earned,
-    )
     await whatsapp.send_text_message(phone, reply)
     return {"status": "processed"}
