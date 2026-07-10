@@ -14,12 +14,20 @@ conversational_reply   – full conversational agent with tool-calling
 
 from __future__ import annotations
 
+import contextvars
 import json
 from collections import defaultdict
 from datetime import date, timedelta
 
 from google import genai
 from google.genai import types
+from google.adk.agents import LlmAgent
+from google.adk.agents.callback_context import CallbackContext
+from google.adk.events import Event
+from google.adk.models.llm_request import LlmRequest
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import FunctionTool
 from supabase._async.client import AsyncClient
 import structlog
 
@@ -349,63 +357,297 @@ No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Conversational Agent with Tool-Calling
+# Conversational Agent (Google ADK)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── Tool declarations ──────────────────────────────────────────────────────────
+# ── Per-request context vars (safe for concurrent async tasks) ─────────────────
 
-_AGENT_TOOLS = types.Tool(
-    function_declarations=[
-        types.FunctionDeclaration(
-            name="log_daily_checkin",
-            description=(
-                "Log today's task completion for one or more active goals. "
-                "Call this whenever the user reports how much they completed — "
-                "e.g. 'done', 'finished everything', 'half done', 'only did DSA', etc. "
-                "Use the schedule_ids provided in the system context."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "completions": {
-                        "type": "array",
-                        "description": "One entry per active goal",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "schedule_id": {
-                                    "type": "string",
-                                    "description": "The goal's UUID from the system context",
-                                },
-                                "completion_pct": {
-                                    "type": "integer",
-                                    "description": "0 = missed, 50 = partial / halfway, 100 = fully done",
-                                },
-                            },
-                            "required": ["schedule_id", "completion_pct"],
-                        },
-                    },
-                },
-                "required": ["completions"],
-            },
-        ),
-        types.FunctionDeclaration(
-            name="apply_skip_day",
-            description=(
-                "Use one Skip Day token to protect today's streak. "
-                "Call when the user says they are skipping today, taking a day off, "
-                "or using their casual leave."
-            ),
-        ),
-        types.FunctionDeclaration(
-            name="get_my_status",
-            description=(
-                "Retrieve the user's live streak, Skip Day balance, and today's logged activity. "
-                "Call when the user asks about their progress, streak, or whether they already checked in."
-            ),
-        ),
+_db_ctx: contextvars.ContextVar = contextvars.ContextVar("db")
+_user_id_ctx: contextvars.ContextVar = contextvars.ContextVar("user_id")
+_schedules_ctx: contextvars.ContextVar = contextvars.ContextVar("schedules")
+_instruction_ctx: contextvars.ContextVar = contextvars.ContextVar("instruction")
+
+
+# ── ADK tool functions ─────────────────────────────────────────────────────────
+
+async def _tool_log_daily_checkin(completions: list[dict]) -> dict:
+    """Log today's task completion for one or more active goals.
+
+    Call whenever the user reports how much they completed — e.g. 'done',
+    'finished everything', 'half done', 'only did DSA'.
+    Each entry in completions needs:
+        - schedule_id (str): the goal UUID from the system context
+        - completion_pct (int): 0 = missed, 50 = partial, 100 = fully done
+
+    Returns logged results and the updated streak info.
+    """
+    from services import gamification  # local import avoids circular dependency
+
+    db = _db_ctx.get()
+    user_id = _user_id_ctx.get()
+
+    results = []
+    last_game = None
+    for c in completions:
+        try:
+            game = await gamification.process_log(
+                db=db,
+                user_id=user_id,
+                schedule_id=c["schedule_id"],
+                log_date=date.today(),
+                completion_pct=int(c["completion_pct"]),
+                is_casual_leave=False,
+            )
+            last_game = game
+            results.append({
+                "schedule_id": c["schedule_id"],
+                "completion_pct": c["completion_pct"],
+                "logged": True,
+            })
+        except Exception as exc:
+            logger.error("adk.tool.log_failed", schedule_id=c.get("schedule_id"), error=str(exc))
+            results.append({"schedule_id": c.get("schedule_id"), "logged": False, "error": str(exc)})
+
+    out: dict = {"date": date.today().isoformat(), "results": results}
+    if last_game:
+        out.update({
+            "new_streak": last_game.current_streak,
+            "all_time_high": last_game.all_time_high,
+            "skip_day_balance": last_game.cl_balance,
+            "streak_saved_by_skip_day": last_game.streak_saved_by_cl,
+            "skip_day_bonus_earned": last_game.cl_earned,
+        })
+    return out
+
+
+async def _tool_apply_skip_day() -> dict:
+    """Use one Skip Day token to protect today's streak.
+
+    Call when the user says they are skipping today, taking a day off,
+    or using their casual leave.
+    """
+    from services import gamification
+
+    db = _db_ctx.get()
+    user_id = _user_id_ctx.get()
+    schedules = _schedules_ctx.get()
+
+    bal_res = (
+        await db.table("leave_balance")
+        .select("balance")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    balance = float(((bal_res.data or [{}])[0] or {}).get("balance", 0))
+    if balance < 1.0:
+        return {"success": False, "reason": "No Skip Days remaining", "balance": 0}
+
+    covered: list[str] = []
+    for sched in schedules:
+        try:
+            await gamification.process_log(
+                db=db,
+                user_id=user_id,
+                schedule_id=sched["id"],
+                log_date=date.today(),
+                completion_pct=0,
+                is_casual_leave=True,
+            )
+            covered.append(sched["title"])
+        except Exception as exc:
+            logger.error("adk.tool.cl_failed", schedule_id=sched["id"], error=str(exc))
+
+    return {
+        "success": bool(covered),
+        "covered_goals": covered,
+        "remaining_balance": balance - 1.0,
+    }
+
+
+async def _tool_get_my_status() -> dict:
+    """Retrieve the user's live streak, Skip Day balance, and today's logged activity.
+
+    Call when the user asks about their progress, streak, or whether they
+    already checked in.
+    """
+    db = _db_ctx.get()
+    user_id = _user_id_ctx.get()
+    schedules = _schedules_ctx.get()
+
+    streak_res = (
+        await db.table("streaks")
+        .select("current_streak, all_time_high")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    streak_row = (streak_res.data or [{}])[0] or {}
+
+    bal_res = (
+        await db.table("leave_balance")
+        .select("balance")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    balance = float(((bal_res.data or [{}])[0] or {}).get("balance", 0))
+
+    today_res = (
+        await db.table("daily_logs")
+        .select("schedule_id, completion_pct, is_casual_leave")
+        .eq("user_id", user_id)
+        .eq("log_date", date.today().isoformat())
+        .execute()
+    )
+    sched_map = {s["id"]: s["title"] for s in schedules}
+    today_logs = [
+        {
+            "goal": sched_map.get(l["schedule_id"], l["schedule_id"]),
+            "completion_pct": l["completion_pct"],
+            "is_skip_day": l["is_casual_leave"],
+        }
+        for l in (today_res.data or [])
     ]
-)
+
+    return {
+        "current_streak": streak_row.get("current_streak", 0),
+        "all_time_high": streak_row.get("all_time_high", 0),
+        "skip_days_balance": balance,
+        "today_logs": today_logs,
+        "checked_in_today": len(today_logs) > 0,
+    }
+
+
+# ── Dynamic system instruction callback ───────────────────────────────────────
+
+def _inject_instruction(cb_ctx: CallbackContext, llm_request: LlmRequest) -> None:
+    """Inject per-request system instruction (user context, streak, goals)."""
+    instruction = _instruction_ctx.get(None)
+    if instruction and llm_request.config is not None:
+        llm_request.config.system_instruction = instruction
+
+
+# ── Module-level ADK singletons (lazy init) ────────────────────────────────────
+
+_AGENT: LlmAgent | None = None
+_RUNNER: Runner | None = None
+_SESSION_SVC: InMemorySessionService | None = None
+_LOADED_SESSIONS: set[str] = set()  # user_ids whose Supabase history has been loaded
+_APP_NAME = "pursuit"
+
+
+def _get_adk_runner() -> tuple[Runner, InMemorySessionService]:
+    global _AGENT, _RUNNER, _SESSION_SVC
+    if _RUNNER is None:
+        _SESSION_SVC = InMemorySessionService()
+        _AGENT = LlmAgent(
+            name=_APP_NAME,
+            model=_MODEL_NAME,
+            instruction="You are Pursuit, a WhatsApp accountability coach.",
+            tools=[
+                FunctionTool(_tool_log_daily_checkin),
+                FunctionTool(_tool_apply_skip_day),
+                FunctionTool(_tool_get_my_status),
+            ],
+            before_model_callback=_inject_instruction,
+        )
+        _RUNNER = Runner(
+            agent=_AGENT,
+            session_service=_SESSION_SVC,
+            app_name=_APP_NAME,
+            auto_create_session=True,
+        )
+    return _RUNNER, _SESSION_SVC
+
+
+# ── Main entry point ───────────────────────────────────────────────────────────
+
+async def conversational_reply(
+    db: AsyncClient,
+    user_id: str,
+    user: dict,
+    text: str,
+    schedules: list[dict],
+) -> str:
+    """Full conversational agent powered by Google ADK.
+
+    Builds a rich per-request system context (streak, goals, recent activity),
+    loads Supabase conversation history into the ADK session on first request,
+    runs the ADK agent (which handles the tool-calling loop automatically),
+    then persists the new turn back to Supabase.
+    """
+    from services import conversation as conv_svc
+
+    # Set context vars for this request (each async task gets its own copy)
+    _db_ctx.set(db)
+    _user_id_ctx.set(user_id)
+    _schedules_ctx.set(schedules)
+
+    # Build fresh system context and expose it to the before_model_callback
+    instruction = await _build_agent_context(db, user_id, user, schedules)
+    _instruction_ctx.set(instruction)
+
+    runner, session_svc = _get_adk_runner()
+    session_id = f"whatsapp-{user_id}"
+
+    # On first request after boot, load Supabase history into the ADK session
+    if user_id not in _LOADED_SESSIONS:
+        existing = await session_svc.get_session(
+            app_name=_APP_NAME, user_id=user_id, session_id=session_id
+        )
+        if existing is None:
+            session = await session_svc.create_session(
+                app_name=_APP_NAME, user_id=user_id, session_id=session_id
+            )
+            history = await conv_svc.get_history(db, user_id)
+            for i, turn in enumerate(history):
+                role = turn["role"]
+                author = "user" if role == "user" else _APP_NAME
+                event = Event(
+                    author=author,
+                    content=types.Content(
+                        role=role,
+                        parts=[types.Part(text=turn["parts"][0]["text"])],
+                    ),
+                    invocation_id=f"history-{i}",
+                    id=Event.new_id(),
+                )
+                await session_svc.append_event(session=session, event=event)
+        _LOADED_SESSIONS.add(user_id)
+
+    # Run the ADK agent and collect the final text response
+    new_message = types.Content(role="user", parts=[types.Part(text=text)])
+    final_text: str | None = None
+
+    try:
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=new_message,
+        ):
+            if event.is_final_response() and event.content and event.content.parts:
+                final_text = "".join(
+                    p.text for p in event.content.parts if p.text
+                ).strip()
+    except Exception as exc:
+        logger.error("adk.conversational_reply_failed", user_id=user_id, error=str(exc))
+
+    if not final_text:
+        name = user.get("name", "there")
+        final_text = (
+            f"Hey {name}! 👋 Got your message. "
+            "Something went wrong on my end — please try again in a moment."
+        )
+
+    # Persist both sides of the turn to Supabase for cross-restart memory
+    try:
+        await conv_svc.save_turn(db, user_id, text, final_text)
+    except Exception as exc:
+        logger.warning("adk.save_turn_failed", error=str(exc))
+
+    return final_text
+
 
 
 # ── Context builder ────────────────────────────────────────────────────────────
@@ -520,211 +762,4 @@ Personality style: {personality}
 - After a successful log, always tell {name} their new streak and give honest, encouraging feedback.
 - Keep replies concise and WhatsApp-friendly.
 - Use *bold* for key numbers/names. Emojis welcome. No # headers. No hashtags."""
-
-
-# ── Tool executor ──────────────────────────────────────────────────────────────
-
-async def _execute_tool(
-    db: AsyncClient,
-    user_id: str,
-    schedules: list[dict],
-    function_call: object,
-) -> dict:
-    """Run the requested tool and return a result dict for the model."""
-    from services import gamification  # local import avoids circular dependency
-
-    name: str = function_call.name  # type: ignore[attr-defined]
-    args: dict = dict(function_call.args or {})  # type: ignore[attr-defined]
-
-    # ── log_daily_checkin ──────────────────────────────────────────────────────
-    if name == "log_daily_checkin":
-        completions: list[dict] = args.get("completions", [])
-        results = []
-        last_game = None
-        for c in completions:
-            try:
-                game = await gamification.process_log(
-                    db=db,
-                    user_id=user_id,
-                    schedule_id=c["schedule_id"],
-                    log_date=date.today(),
-                    completion_pct=int(c["completion_pct"]),
-                    is_casual_leave=False,
-                )
-                last_game = game
-                results.append({"schedule_id": c["schedule_id"], "completion_pct": c["completion_pct"], "logged": True})
-            except Exception as exc:
-                logger.error("ai_agent.tool.log_failed", schedule_id=c.get("schedule_id"), error=str(exc))
-                results.append({"schedule_id": c.get("schedule_id"), "logged": False, "error": str(exc)})
-
-        out: dict = {"date": date.today().isoformat(), "results": results}
-        if last_game:
-            out.update({
-                "new_streak": last_game.current_streak,
-                "all_time_high": last_game.all_time_high,
-                "skip_day_balance": last_game.cl_balance,
-                "streak_saved_by_skip_day": last_game.streak_saved_by_cl,
-                "skip_day_bonus_earned": last_game.cl_earned,
-            })
-        return out
-
-    # ── apply_skip_day ─────────────────────────────────────────────────────────
-    elif name == "apply_skip_day":
-        bal_res = await db.table("leave_balance").select("balance").eq("user_id", user_id).limit(1).execute()
-        balance = float(((bal_res.data or [{}])[0] or {}).get("balance", 0))
-        if balance < 1.0:
-            return {"success": False, "reason": "No Skip Days remaining", "balance": 0}
-
-        covered: list[str] = []
-        for sched in schedules:
-            try:
-                await gamification.process_log(
-                    db=db, user_id=user_id, schedule_id=sched["id"],
-                    log_date=date.today(), completion_pct=0, is_casual_leave=True,
-                )
-                covered.append(sched["title"])
-            except Exception as exc:
-                logger.error("ai_agent.tool.cl_failed", schedule_id=sched["id"], error=str(exc))
-
-        return {
-            "success": bool(covered),
-            "covered_goals": covered,
-            "remaining_balance": balance - 1.0,
-        }
-
-    # ── get_my_status ──────────────────────────────────────────────────────────
-    elif name == "get_my_status":
-        streak_res = (
-            await db.table("streaks")
-            .select("current_streak, all_time_high")
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
-        streak_row = (streak_res.data or [{}])[0] or {}
-        bal_res = await db.table("leave_balance").select("balance").eq("user_id", user_id).limit(1).execute()
-        balance = float(((bal_res.data or [{}])[0] or {}).get("balance", 0))
-
-        today_logs_res = (
-            await db.table("daily_logs")
-            .select("schedule_id, completion_pct, is_casual_leave")
-            .eq("user_id", user_id)
-            .eq("log_date", date.today().isoformat())
-            .execute()
-        )
-        sched_map = {s["id"]: s["title"] for s in schedules}
-        today_logs = [
-            {
-                "goal": sched_map.get(l["schedule_id"], l["schedule_id"]),
-                "completion_pct": l["completion_pct"],
-                "is_skip_day": l["is_casual_leave"],
-            }
-            for l in (today_logs_res.data or [])
-        ]
-
-        return {
-            "current_streak": streak_row.get("current_streak", 0),
-            "all_time_high": streak_row.get("all_time_high", 0),
-            "skip_days_balance": balance,
-            "today_logs": today_logs,
-            "checked_in_today": len(today_logs) > 0,
-        }
-
-    else:
-        logger.warning("ai_agent.tool.unknown", name=name)
-        return {"error": f"Unknown tool: {name}"}
-
-
-# ── Main entry point ───────────────────────────────────────────────────────────
-
-async def conversational_reply(
-    db: AsyncClient,
-    user_id: str,
-    user: dict,
-    text: str,
-    schedules: list[dict],
-) -> str:
-    """Full conversational agent with tool-calling and persistent memory.
-
-    Builds a rich system context, retrieves recent conversation history,
-    and runs a Gemini agent loop that can call tools (log check-ins, apply
-    skip days, query status) before generating the final WhatsApp reply.
-    """
-    from services import conversation as conv_svc
-
-    system_ctx = await _build_agent_context(db, user_id, user, schedules)
-    history = await conv_svc.get_history(db, user_id)
-    history.append({"role": "user", "parts": [{"text": text}]})
-
-    client = _get_client()
-    config = types.GenerateContentConfig(
-        system_instruction=system_ctx,
-        tools=[_AGENT_TOOLS],
-    )
-
-    final_text: str | None = None
-
-    # Agent loop: up to 3 tool-call rounds before a final text response
-    for _ in range(4):
-        try:
-            response = await client.aio.models.generate_content(
-                model=_MODEL_NAME,
-                contents=history,
-                config=config,
-            )
-        except Exception as exc:
-            logger.error("ai_agent.conversational_generate_failed", error=str(exc))
-            break
-
-        candidate = response.candidates[0]
-        parts = candidate.content.parts or []
-
-        # Separate text parts from function-call parts
-        func_calls = [p for p in parts if getattr(p, "function_call", None)]
-        text_parts = [p for p in parts if getattr(p, "text", None)]
-
-        if func_calls:
-            # Add model's function-call response to history (as dict for consistency)
-            model_parts_dict = []
-            for p in parts:
-                if getattr(p, "function_call", None):
-                    model_parts_dict.append({
-                        "function_call": {
-                            "name": p.function_call.name,
-                            "args": dict(p.function_call.args or {}),
-                        }
-                    })
-                elif getattr(p, "text", None):
-                    model_parts_dict.append({"text": p.text})
-            history.append({"role": "model", "parts": model_parts_dict})
-
-            # Execute each tool and collect results
-            tool_parts = []
-            for fc_part in func_calls:
-                result = await _execute_tool(db, user_id, schedules, fc_part.function_call)
-                tool_parts.append({
-                    "function_response": {
-                        "name": fc_part.function_call.name,
-                        "response": result,
-                    }
-                })
-            history.append({"role": "tool", "parts": tool_parts})
-
-        else:
-            # No tool calls — this is the final text response
-            final_text = "".join(p.text for p in text_parts).strip()
-            break
-
-    if not final_text:
-        name = user.get("name", "there")
-        final_text = f"Hey {name}! 👋 Got your message. Something went wrong on my end — please try again in a moment."
-
-    # Persist both sides of the turn (fire-and-forget errors are OK)
-    try:
-        from services import conversation as conv_svc
-        await conv_svc.save_turn(db, user_id, text, final_text)
-    except Exception as exc:
-        logger.warning("ai_agent.save_turn_failed", error=str(exc))
-
-    return final_text
 
