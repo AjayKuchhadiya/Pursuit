@@ -118,6 +118,8 @@ async def _process_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # ty
         completion_pct, is_cl = 50, False
     elif action == whatsapp.BUTTON_ID_CASUAL_LEAVE:
         completion_pct, is_cl = 0, True
+    elif action == "log_0":  # "Missed" button on the consolidated evening card
+        completion_pct, is_cl = 0, False
     else:
         logger.warning("webhook.unknown_button", button_id=button_id)
         return {"status": "ignored"}
@@ -171,14 +173,21 @@ async def _process_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # ty
                 if float(((bal_res.data or [{}])[0] or {}).get("balance", 0.0)) < 1.0:
                     await whatsapp.send_text_message(phone, "❌ You don't have any Skip Days left!")
                     return {"status": "no_cl_balance"}
-            last_result = await gamification.process_log(
-                db=db, user_id=user_id, schedule_id=sched["id"],
-                log_date=_date.today(), completion_pct=completion_pct, is_casual_leave=is_cl,
-            )
-            results.append({"schedule_title": sched["title"], "completion_pct": completion_pct})
+            try:
+                last_result = await gamification.process_log(
+                    db=db, user_id=user_id, schedule_id=sched["id"],
+                    log_date=_date.today(), completion_pct=completion_pct, is_casual_leave=is_cl,
+                )
+                results.append({"schedule_title": sched["title"], "completion_pct": completion_pct})
+            except Exception as exc:
+                logger.error("webhook.button_log_failed", schedule_id=sched["id"], error=str(exc))
 
         if last_result is None:
-            return {"status": "no_schedule"}
+            await whatsapp.send_text_message(
+                phone,
+                "⚠️ Something went wrong logging your check-in. Please try again or use the dashboard.",
+            )
+            return {"status": "log_failed"}
 
         user_name_res = await db.table("users").select("name").eq("id", user_id).limit(1).execute()
         user_name = ((user_name_res.data or [{}])[0] or {}).get("name") or "there"
@@ -221,10 +230,18 @@ async def _process_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # ty
             return {"status": "no_cl_balance"}
 
     from datetime import date as _date2
-    result = await gamification.process_log(
-        db=db, user_id=user_id, schedule_id=sched["id"],
-        log_date=_date2.today(), completion_pct=completion_pct, is_casual_leave=is_cl,
-    )
+    try:
+        result = await gamification.process_log(
+            db=db, user_id=user_id, schedule_id=sched["id"],
+            log_date=_date2.today(), completion_pct=completion_pct, is_casual_leave=is_cl,
+        )
+    except Exception as exc:
+        logger.error("webhook.button_log_failed", schedule_id=sched["id"], error=str(exc))
+        await whatsapp.send_text_message(
+            phone,
+            "⚠️ Something went wrong logging your check-in. Please try again or use the dashboard.",
+        )
+        return {"status": "log_failed"}
 
     user_name_res = await db.table("users").select("name").eq("id", user_id).limit(1).execute()
     user_name = ((user_name_res.data or [{}])[0] or {}).get("name") or "there"

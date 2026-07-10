@@ -14,6 +14,7 @@ services:
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
+    preDeployCommand: PYTHONPATH=src alembic upgrade head
     startCommand: PYTHONPATH=src uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
 
