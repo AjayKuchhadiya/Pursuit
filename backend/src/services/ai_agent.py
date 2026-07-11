@@ -535,7 +535,7 @@ async def _tool_get_my_status() -> dict:
 
 # ── Dynamic system instruction callback ───────────────────────────────────────
 
-def _inject_instruction(cb_ctx: CallbackContext, llm_request: LlmRequest) -> None:
+def _inject_instruction(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
     """Inject per-request system instruction (user context, streak, goals)."""
     instruction = _instruction_ctx.get(None)
     if instruction and llm_request.config is not None:
