@@ -151,6 +151,12 @@ async def evening_ping(
         if not (force or _in_window(time(h, m), tz)):
             continue
 
+        try:
+            tz_obj = zoneinfo.ZoneInfo(tz)
+        except zoneinfo.ZoneInfoNotFoundError:
+            tz_obj = zoneinfo.ZoneInfo("Asia/Kolkata")
+        today_weekday = datetime.now(tz_obj).weekday()
+
         sched_res = (
             await db.table("schedules")
             .select("id, title, days_of_week")
