@@ -11,6 +11,14 @@ Built with **FastAPI**, **PostgreSQL (Supabase)**, and **Google Gemini 2.5 Flash
 
 ---
 
+## Screenshots
+
+| Web Dashboard | WhatsApp Check-In |
+|---|---|
+| ![Home page](./backend/assets/Home_page.png) | ![WhatsApp check-in](./backend/assets/Whatsapp.png) |
+
+---
+
 ## How It Works
 
 1. **Sign up** on the web dashboard with your phone number. Receive an OTP on WhatsApp and log in.
