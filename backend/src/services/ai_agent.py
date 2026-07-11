@@ -384,7 +384,7 @@ _instruction_ctx: contextvars.ContextVar = contextvars.ContextVar("instruction")
 
 # ── ADK tool functions ─────────────────────────────────────────────────────────
 
-async def _tool_log_daily_checkin(completions: list[dict]) -> dict:
+async def log_daily_checkin(completions: list[dict]) -> dict:
     """Log today's task completion for one or more active goals.
 
     Call whenever the user reports how much they completed — e.g. 'done',
@@ -434,7 +434,7 @@ async def _tool_log_daily_checkin(completions: list[dict]) -> dict:
     return out
 
 
-async def _tool_apply_skip_day() -> dict:
+async def apply_skip_day() -> dict:
     """Use one Skip Day token to protect today's streak.
 
     Call when the user says they are skipping today, taking a day off,
@@ -479,7 +479,7 @@ async def _tool_apply_skip_day() -> dict:
     }
 
 
-async def _tool_get_my_status() -> dict:
+async def get_my_status() -> dict:
     """Retrieve the user's live streak, Skip Day balance, and today's logged activity.
 
     Call when the user asks about their progress, streak, or whether they
@@ -560,9 +560,9 @@ def _get_adk_runner() -> tuple[Runner, InMemorySessionService]:
             model=_MODEL_NAME,
             instruction="You are Pursuit, a WhatsApp accountability coach.",
             tools=[
-                FunctionTool(_tool_log_daily_checkin),
-                FunctionTool(_tool_apply_skip_day),
-                FunctionTool(_tool_get_my_status),
+                FunctionTool(log_daily_checkin),
+                FunctionTool(apply_skip_day),
+                FunctionTool(get_my_status),
             ],
             before_model_callback=_inject_instruction,
         )
