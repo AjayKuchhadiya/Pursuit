@@ -14,6 +14,7 @@ conversational_reply   – full conversational agent with tool-calling
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
 from collections import defaultdict
@@ -36,6 +37,8 @@ from config import settings
 logger = structlog.get_logger(__name__)
 
 _MODEL_NAME = "gemini-2.5-flash"
+_RETRY_DELAY_S = 60   # seconds to wait before retrying a 503 from Gemini
+_MAX_RETRIES = 2
 _client: genai.Client | None = None
 
 
@@ -44,6 +47,24 @@ def _get_client() -> genai.Client:
     if _client is None:
         _client = genai.Client(api_key=settings.gemini_api_key)
     return _client
+
+
+async def _generate(prompt: str):
+    """Call Gemini with automatic retries on 503 UNAVAILABLE."""
+    client = _get_client()
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            return await client.aio.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        except Exception as exc:
+            if attempt < _MAX_RETRIES and "503" in str(exc):
+                logger.warning(
+                    "ai_agent.gemini_503_retry",
+                    attempt=attempt + 1,
+                    delay_s=_RETRY_DELAY_S,
+                )
+                await asyncio.sleep(_RETRY_DELAY_S)
+            else:
+                raise
 
 
 def _personality_desc(personality: str) -> str:
@@ -106,9 +127,8 @@ If a task isn't explicitly mentioned, infer from overall context
 Respond ONLY with a valid JSON array — no markdown, no explanation:
 [{{"schedule_id": "...", "schedule_title": "...", "completion_pct": 100}}]"""
 
-    client = _get_client()
     try:
-        response = await client.aio.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        response = await _generate(prompt)
         return json.loads(_extract_json(response.text))
     except Exception as exc:
         logger.error("ai_agent.parse_checkin_failed", error=str(exc))
@@ -144,9 +164,8 @@ Write a morning check-in message (2-4 sentences).
 Use WhatsApp formatting: *bold* for key words, _italic_ sparingly. Use line breaks generously between sections.
 No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
-    client = _get_client()
     try:
-        response = await client.aio.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        response = await _generate(prompt)
         return response.text.strip()
     except Exception as exc:
         logger.error("ai_agent.morning_msg_failed", error=str(exc))
@@ -180,9 +199,8 @@ Write the body of an evening check-in card (2-3 sentences).
 Use WhatsApp formatting: *bold* for task names or key phrases. Use line breaks between sections.
 No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
-    client = _get_client()
     try:
-        response = await client.aio.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        response = await _generate(prompt)
         return response.text.strip()
     except Exception as exc:
         logger.error("ai_agent.evening_prompt_failed", error=str(exc))
@@ -231,9 +249,8 @@ Write a short reply (2-4 sentences). Be specific about what they did.
 Use WhatsApp formatting: *bold* for the streak count and task names. Use line breaks between sections.
 No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
-    client = _get_client()
     try:
-        response = await client.aio.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        response = await _generate(prompt)
         return response.text.strip()
     except Exception as exc:
         logger.error("ai_agent.checkin_reply_failed", error=str(exc))
@@ -278,9 +295,8 @@ Write a weekly summary structured as:
 Use WhatsApp formatting: *bold* for section labels and key numbers, • for bullets. Use line breaks between each section.
 No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
-    client = _get_client()
     try:
-        response = await client.aio.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        response = await _generate(prompt)
         return response.text.strip()
     except Exception as exc:
         logger.error("ai_agent.weekly_summary_failed", error=str(exc))
@@ -305,9 +321,8 @@ Classify this message as exactly one of:
 
 Reply with ONLY one word: checkin, query, or other."""
 
-    client = _get_client()
     try:
-        response = await client.aio.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        response = await _generate(prompt)
         label = response.text.strip().lower()
         if label in ("checkin", "query", "other"):
             return label
@@ -347,9 +362,8 @@ If they ask about streak or stats, *bold* the numbers.
 Use WhatsApp formatting: *bold* for emphasis, • for bullet lists. Use line breaks between sections.
 No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
 
-    client = _get_client()
     try:
-        response = await client.aio.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        response = await _generate(prompt)
         return response.text.strip()
     except Exception as exc:
         logger.error("ai_agent.query_reply_failed", error=str(exc))

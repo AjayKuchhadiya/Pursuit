@@ -6,6 +6,7 @@ POST /webhook  – Incoming button-tap events → gamification → reply
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import structlog
@@ -19,6 +20,12 @@ from services import ai_agent, bot_personality, gamification, whatsapp
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 logger = structlog.get_logger(__name__)
+
+# In-memory message-ID deduplication — prevents Meta retry spam.
+# Meta retries the webhook if it doesn't receive a 200 within ~20 s, but the
+# AI agent can take longer. We ack immediately and process in a background
+# task; duplicate deliveries of the same message ID are silently dropped.
+_seen_msg_ids: set[str] = set()
 
 
 # ── GET: Meta verification handshake ─────────────────────────────────────────
@@ -62,19 +69,41 @@ class WebhookPayload(BaseModel):
 
 @router.post("", status_code=status.HTTP_200_OK)
 async def receive_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # type: ignore[type-arg]
-    """Parse Meta's webhook payload and process interactive button replies."""
+    """Ack Meta immediately and process in background to prevent retry spam."""
+    # Extract message ID early for deduplication
     try:
-        return await _process_webhook(body, db)
+        payload = body.model_dump()
+        msg_id: str = payload["entry"][0]["changes"][0]["value"]["messages"][0]["id"]
+    except (KeyError, IndexError, TypeError):
+        # Status update or other non-message event — nothing to deduplicate
+        asyncio.create_task(_process_webhook(body, db))
+        return {"status": "accepted"}
+
+    if msg_id in _seen_msg_ids:
+        logger.info("webhook.duplicate_ignored", msg_id=msg_id)
+        return {"status": "duplicate"}
+
+    _seen_msg_ids.add(msg_id)
+    # Prevent unbounded memory growth on long-running servers
+    if len(_seen_msg_ids) > 10_000:
+        _seen_msg_ids.clear()
+
+    asyncio.create_task(_process_webhook(body, db))
+    return {"status": "accepted"}
+
+
+async def _process_webhook(body: WebhookPayload, db: SupabaseDep) -> None:  # type: ignore[type-arg]
+    try:
+        await _handle_webhook(body, db)
     except Exception as exc:
         logger.error(
             "webhook.unhandled_error",
             error=str(exc),
             traceback=__import__("traceback").format_exc(),
         )
-        raise
 
 
-async def _process_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # type: ignore[type-arg]
+async def _handle_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # type: ignore[type-arg]
     try:
         payload = body.model_dump()
     except Exception:

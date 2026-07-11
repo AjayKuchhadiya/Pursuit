@@ -213,13 +213,19 @@ async def _evening_job() -> None:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _time_matches(hhmm: str, now: datetime) -> bool:
-    """Return True if 'HH:MM' exactly matches the current hour and minute."""
+def _time_matches(hhmm: str, now: datetime, lead_minutes: int = 2) -> bool:
+    """Return True if now is exactly `lead_minutes` before 'HH:MM'.
+
+    Firing early gives the server time to generate and deliver the message
+    so it arrives at the user's chosen time.
+    """
     try:
         h, m = map(int, hhmm.split(":")[:2])
     except (ValueError, AttributeError):
         return False
-    return now.hour == h and now.minute == m
+    target_mins = (h * 60 + m - lead_minutes) % (24 * 60)
+    now_mins = now.hour * 60 + now.minute
+    return now_mins == target_mins
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
