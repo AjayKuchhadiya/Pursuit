@@ -86,9 +86,8 @@ def create_app() -> FastAPI:
         description="Gamified WhatsApp accountability partner – backend",
         version="0.1.0",
         lifespan=lifespan,
-        # In production, hide docs behind auth or disable entirely
-        docs_url="/docs" if settings.app_env != "production" else None,
-        redoc_url="/redoc" if settings.app_env != "production" else None,
+        docs_url="/docs",
+        redoc_url="/redoc",
     )
 
     # ── CORS ─────────────────────────────────────────────────────────────────

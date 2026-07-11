@@ -150,8 +150,6 @@ The API will be available at `http://localhost:8000`.
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
-> Docs are disabled automatically in production (`APP_ENV=production`).
-
 ### Exposing the Webhook Locally
 
 The Meta WhatsApp webhook requires a public HTTPS URL. Use [ngrok](https://ngrok.com/):
