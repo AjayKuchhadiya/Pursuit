@@ -56,7 +56,7 @@ async def morning_ping(
 
     users_res = (
         await db.table("users")
-        .select("id, phone_number, timezone, personality, name")
+        .select("id, phone_number, timezone, personality, name, morning_time")
         .eq("is_active", True)
         .execute()
     )
@@ -68,16 +68,11 @@ async def morning_ping(
         tz: str = user.get("timezone") or "Asia/Kolkata"
         personality: str = user.get("personality") or "analyst"
         user_name: str = user.get("name") or "there"
+        user_morning: str = user.get("morning_time") or "08:00"
 
-        sched_res = (
-            await db.table("schedules")
-            .select("id, title, morning_time, days_of_week")
-            .eq("user_id", user_id)
-            .eq("is_active", True)
-            .execute()
-        )
-        schedules = sched_res.data or []
-        if not schedules:
+        # Check if it's the user's morning reminder time
+        h, m = map(int, user_morning.split(":")[:2])
+        if not (force or _in_window(time(h, m), tz)):
             continue
 
         try:
@@ -86,13 +81,17 @@ async def morning_ping(
             tz_obj = zoneinfo.ZoneInfo("Asia/Kolkata")
         today_weekday = datetime.now(tz_obj).weekday()
 
+        # Fetch ALL active tasks scheduled for today
+        sched_res = (
+            await db.table("schedules")
+            .select("id, title, days_of_week")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .execute()
+        )
         due = [
-            s for s in schedules
+            s for s in (sched_res.data or [])
             if today_weekday in (s.get("days_of_week") or list(range(7)))
-            and (force or _in_window(
-                time(*map(int, (s.get("morning_time") or "08:00").split(":")[:2])),
-                tz,
-            ))
         ]
         if not due:
             continue
@@ -134,7 +133,7 @@ async def evening_ping(
 
     users_res = (
         await db.table("users")
-        .select("id, phone_number, timezone, personality, name")
+        .select("id, phone_number, timezone, personality, name, evening_time")
         .eq("is_active", True)
         .execute()
     )
@@ -145,32 +144,26 @@ async def evening_ping(
         tz: str = user.get("timezone") or "Asia/Kolkata"
         personality: str = user.get("personality") or "analyst"
         user_name: str = user.get("name") or "there"
+        user_evening: str = user.get("evening_time") or "21:00"
+
+        # Check if it's the user's evening reminder time
+        h, m = map(int, user_evening.split(":")[:2])
+        if not (force or _in_window(time(h, m), tz)):
+            continue
 
         sched_res = (
             await db.table("schedules")
-            .select("id, title, evening_time, days_of_week")
+            .select("id, title, days_of_week")
             .eq("user_id", user_id)
             .eq("is_active", True)
             .execute()
         )
-        schedules = sched_res.data or []
-        if not schedules:
-            continue
 
-        try:
-            tz_obj = zoneinfo.ZoneInfo(tz)
-        except zoneinfo.ZoneInfoNotFoundError:
-            tz_obj = zoneinfo.ZoneInfo("Asia/Kolkata")
-        today_weekday = datetime.now(tz_obj).weekday()
-
-        # Schedules due today that haven’t been logged yet
+        # Tasks due today that haven't been logged yet
         due: list[dict] = []
-        for s in schedules:
+        for s in sched_res.data or []:
             days = s.get("days_of_week") or list(range(7))
             if today_weekday not in days:
-                continue
-            h, m = map(int, (s.get("evening_time") or "21:00").split(":")[:2])
-            if not (force or _in_window(time(h, m), tz)):
                 continue
             logged = (
                 await db.table("daily_logs")

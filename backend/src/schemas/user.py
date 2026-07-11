@@ -18,6 +18,8 @@ class UserUpdate(BaseModel):
     personality: Personality | None = None
     timezone: str | None = None
     name: str | None = None
+    morning_time: str | None = None  # HH:MM 24h in user's local timezone
+    evening_time: str | None = None  # HH:MM 24h in user's local timezone
 
     @field_validator("timezone")
     @classmethod
@@ -39,4 +41,6 @@ class UserRead(BaseModel):
     name: str
     personality: Personality
     timezone: str
+    morning_time: str = "08:00"
+    evening_time: str = "21:00"
     is_active: bool

@@ -39,7 +39,7 @@ async def _morning_job() -> None:
 
     users_res = (
         await db.table("users")
-        .select("id, phone_number, timezone, personality, name")
+        .select("id, phone_number, timezone, personality, name, morning_time")
         .eq("is_active", True)
         .execute()
     )
@@ -51,6 +51,7 @@ async def _morning_job() -> None:
         tz_str: str = user.get("timezone") or "Asia/Kolkata"
         personality: str = user.get("personality") or "analyst"
         user_name: str = user.get("name") or "there"
+        user_morning: str = user.get("morning_time") or "08:00"
 
         try:
             tz = zoneinfo.ZoneInfo(tz_str)
@@ -59,9 +60,13 @@ async def _morning_job() -> None:
 
         now = datetime.now(tz)
 
+        # Only send if it is the user's morning reminder time
+        if not _time_matches(user_morning, now):
+            continue
+
         sched_res = (
             await db.table("schedules")
-            .select("id, title, morning_time, days_of_week")
+            .select("id, title, days_of_week")
             .eq("user_id", user_id)
             .eq("is_active", True)
             .execute()
@@ -70,7 +75,6 @@ async def _morning_job() -> None:
         due = [
             s for s in (sched_res.data or [])
             if now.weekday() in (s.get("days_of_week") or list(range(7)))
-            and _time_matches(s.get("morning_time") or "08:00", now)
         ]
 
         if not due:
@@ -112,7 +116,7 @@ async def _evening_job() -> None:
 
     users_res = (
         await db.table("users")
-        .select("id, phone_number, timezone, personality, name")
+        .select("id, phone_number, timezone, personality, name, evening_time")
         .eq("is_active", True)
         .execute()
     )
@@ -124,6 +128,7 @@ async def _evening_job() -> None:
         tz_str: str = user.get("timezone") or "Asia/Kolkata"
         personality: str = user.get("personality") or "analyst"
         user_name: str = user.get("name") or "there"
+        user_evening: str = user.get("evening_time") or "21:00"
 
         try:
             tz = zoneinfo.ZoneInfo(tz_str)
@@ -132,9 +137,13 @@ async def _evening_job() -> None:
 
         now = datetime.now(tz)
 
+        # Only send if it is the user's evening reminder time
+        if not _time_matches(user_evening, now):
+            continue
+
         sched_res = (
             await db.table("schedules")
-            .select("id, title, evening_time, days_of_week")
+            .select("id, title, days_of_week")
             .eq("user_id", user_id)
             .eq("is_active", True)
             .execute()
@@ -145,9 +154,7 @@ async def _evening_job() -> None:
             days = s.get("days_of_week") or list(range(7))
             if now.weekday() not in days:
                 continue
-            if not _time_matches(s.get("evening_time") or "21:00", now):
-                continue
-            # Skip if already logged today (user already checked in)
+            # Skip if already logged today
             logged = (
                 await db.table("daily_logs")
                 .select("id")
