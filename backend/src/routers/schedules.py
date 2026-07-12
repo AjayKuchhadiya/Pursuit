@@ -32,6 +32,7 @@ async def create_schedule(
             "title": body.title,
             "is_active": body.is_active,
             "days_of_week": body.days_of_week,
+            "duration_minutes": body.duration_minutes,
         })
         .select("*")
         .execute()

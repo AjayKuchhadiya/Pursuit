@@ -158,11 +158,11 @@ Today's tasks: {', '.join(schedules)}
 
 Write a morning check-in message (2-4 sentences).
 - Reference their streak and specific tasks naturally.
-- End with the numbered task list formatted as:
+- End with the numbered task list:
   1. Task name
   2. Task name
-Use WhatsApp formatting: *bold* for key words, _italic_ sparingly. Use line breaks generously between sections.
-No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
+WhatsApp formatting: *bold* for key words. Use line breaks between sections.
+Bullet lists: use - item (NOT * item). No # headers. No hashtags. Emojis welcome."""
 
     try:
         response = await _generate(prompt)
@@ -193,11 +193,11 @@ Skip Days left: {cl_balance:.1f}
 Today's tasks: {', '.join(schedules)}
 
 Write the body of an evening check-in card (2-3 sentences).
-- List each task as a bullet: • Task name
+- List each task as: - Task name
 - Ask how it went
 - Mention they can also reply in plain text for a more detailed response
-Use WhatsApp formatting: *bold* for task names or key phrases. Use line breaks between sections.
-No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
+WhatsApp formatting: *bold* for task names or key phrases. Use line breaks between sections.
+Bullet lists: use - item (NOT * item). No # headers. No hashtags. Emojis welcome."""
 
     try:
         response = await _generate(prompt)
@@ -243,11 +243,11 @@ Missed (0%): {missed or 'none'}
 {chr(10).join(extras)}
 
 Write a short reply (2-4 sentences). Be specific about what they did.
-- If there are completed/partial/missed tasks, list them with bullets (✅ done, 🔄 partial, ❌ missed).
+- List tasks with status bullets (✅ done, 🔄 partial, ❌ missed).
 {"Acknowledge the Skip Day." if streak_saved else ""}
 {"Celebrate the bonus Skip Day!" if cl_earned else ""}
-Use WhatsApp formatting: *bold* for the streak count and task names. Use line breaks between sections.
-No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
+WhatsApp formatting: *bold* for the streak count and task names. Use line breaks between sections.
+Bullet lists: use - item (NOT * item). No # headers. No hashtags. Emojis welcome."""
 
     try:
         response = await _generate(prompt)
@@ -288,12 +288,12 @@ Weekly report for {user_name}:
 
 Write a weekly summary structured as:
 - 1 opening sentence with overall vibe
-- *This week's wins:* followed by bullet points (• ...)
+- *This week's wins:* followed by bullet points using - item format
 - *Watch out for:* one pattern to improve
 - *Tip for next week:* one concrete actionable tip
 
-Use WhatsApp formatting: *bold* for section labels and key numbers, • for bullets. Use line breaks between each section.
-No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
+WhatsApp formatting: *bold* for section labels and key numbers. Use line breaks between each section.
+Bullet lists: use - item (NOT * item). No # headers. No hashtags. Emojis welcome."""
 
     try:
         response = await _generate(prompt)
@@ -359,8 +359,8 @@ Answer helpfully in 2-3 sentences. If they ask about tasks, list them as:
   1. *Task name*
   2. *Task name*
 If they ask about streak or stats, *bold* the numbers.
-Use WhatsApp formatting: *bold* for emphasis, • for bullet lists. Use line breaks between sections.
-No hashtags. No # headers. No double asterisks (**). Emojis welcome."""
+WhatsApp formatting: *bold* for emphasis. Bullet lists: use - item (NOT * item). Use line breaks between sections.
+No # headers. No hashtags. Emojis welcome."""
 
     try:
         response = await _generate(prompt)
@@ -740,10 +740,13 @@ async def _build_agent_context(
         )
         rewards_block = f"\n## What {user.get('name', 'you')} Is Working Towards\n{r_lines}"
 
-    # Active goals with IDs (agent needs these for log_daily_checkin)
-    goals_str = "\n".join(
-        f'  - "{s["title"]}" (schedule_id: {s["id"]})' for s in schedules
+    # Active goals — titles for display, IDs only for tool calls
+    goals_display = "\n".join(
+        f'  - {s["title"]}' for s in schedules
     ) or "  (no active goals yet)"
+    goals_with_ids = "\n".join(
+        f'  - {s["title"]}  →  id:{s["id"]}' for s in schedules
+    ) or "  (none)"
 
     personality = _personality_desc(user.get("personality", "analyst"))
     name = user.get("name", "there")
@@ -758,11 +761,22 @@ Today: {today_str}
 - Skip Days available: {cl_balance:.1f}
 
 ## Active Goals
-{goals_str}
+{goals_display}
+
+## Goal IDs — for tool calls only, NEVER show these to {name}
+{goals_with_ids}
 
 ## Last 7 Days
 {activity_str}
 {rewards_block}
+
+## WhatsApp Formatting Rules
+- Bold: *text* — use for names, numbers, key phrases
+- Bullets: use - item (hyphen + space), NOT * item (asterisk conflicts with bold)
+- Numbered lists: 1. item
+- No # headers, no hashtags, no markdown code blocks
+- Emojis welcome
+- NEVER include schedule IDs, UUIDs, or any internal identifiers in replies
 
 ## Available Tools
 
