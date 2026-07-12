@@ -69,6 +69,7 @@ async def _morning_job() -> None:
             .select("id, title, days_of_week")
             .eq("user_id", user_id)
             .eq("is_active", True)
+            .eq("status", "active")
             .execute()
         )
 
@@ -146,6 +147,7 @@ async def _evening_job() -> None:
             .select("id, title, days_of_week")
             .eq("user_id", user_id)
             .eq("is_active", True)
+            .eq("status", "active")
             .execute()
         )
 

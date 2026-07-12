@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 import structlog
@@ -17,8 +18,18 @@ logger = structlog.get_logger(__name__)
 
 @router.get("", response_model=list[ScheduleRead])
 async def list_schedules(db: SupabaseDep, user: CurrentUser) -> list[ScheduleRead]:
-    res = await db.table("schedules").select("*").eq("user_id", user["id"]).execute()
-    return [ScheduleRead(**row) for row in (res.data or [])]
+    res = await db.table("schedules").select("*").eq("user_id", user["id"]).eq("is_active", True).execute()
+    rows = res.data or []
+    if rows:
+        ids = [r["id"] for r in rows]
+        logs_res = await db.table("daily_logs").select("schedule_id").in_("schedule_id", ids).execute()
+        counts: dict[str, int] = {}
+        for log in (logs_res.data or []):
+            sid = log["schedule_id"]
+            counts[sid] = counts.get(sid, 0) + 1
+        for r in rows:
+            r["total_checkins"] = counts.get(r["id"], 0)
+    return [ScheduleRead(**r) for r in rows]
 
 
 @router.post("", response_model=ScheduleRead, status_code=status.HTTP_201_CREATED)
@@ -48,6 +59,8 @@ async def update_schedule(
     updates = body.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No fields to update")
+    if updates.get("status") == "completed":
+        updates["completed_at"] = datetime.now(timezone.utc).isoformat()
     res = (
         await db.table("schedules")
         .update(updates)

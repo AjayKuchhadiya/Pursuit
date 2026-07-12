@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -22,6 +24,7 @@ class ScheduleUpdate(BaseModel):
     is_active: bool | None = None
     days_of_week: list[int] | None = None
     duration_minutes: int | None = None
+    status: Literal["active", "paused", "completed"] | None = None
 
 
 class ScheduleRead(BaseModel):
@@ -31,3 +34,7 @@ class ScheduleRead(BaseModel):
     is_active: bool
     days_of_week: list[int]
     duration_minutes: int
+    status: str = "active"
+    completed_at: datetime | None = None
+    created_at: datetime
+    total_checkins: int = 0

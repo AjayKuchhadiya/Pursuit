@@ -202,6 +202,7 @@ async def _handle_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # typ
             .select("id, title")
             .eq("user_id", user_id)
             .eq("is_active", True)
+            .eq("status", "active")
             .execute()
         )
         if not sched_res.data:
@@ -255,13 +256,14 @@ async def _handle_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # typ
     if schedule_id_from_button:
         sched_res = (
             await db.table("schedules").select("id, title")
-            .eq("id", schedule_id_from_button).eq("user_id", user_id).eq("is_active", True)
+            .eq("id", schedule_id_from_button).eq("user_id", user_id)
+            .eq("is_active", True).eq("status", "active")
             .limit(1).execute()
         )
     else:
         sched_res = (
             await db.table("schedules").select("id, title")
-            .eq("user_id", user_id).eq("is_active", True).limit(1).execute()
+            .eq("user_id", user_id).eq("is_active", True).eq("status", "active").limit(1).execute()
         )
 
     if not sched_res.data:
@@ -325,7 +327,7 @@ async def _process_text_checkin(phone: str, text: str, db: SupabaseDep) -> dict:
 
     sched_res = (
         await db.table("schedules").select("id, title")
-        .eq("user_id", user_id).eq("is_active", True).execute()
+        .eq("user_id", user_id).eq("is_active", True).eq("status", "active").execute()
     )
     schedules = sched_res.data or []
 
