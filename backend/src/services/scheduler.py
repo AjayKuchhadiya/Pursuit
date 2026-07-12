@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import zoneinfo
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -39,7 +39,7 @@ async def _morning_job() -> None:
 
     users_res = (
         await db.table("users")
-        .select("id, phone_number, timezone, personality, name, morning_time")
+        .select("id, phone_number, timezone, personality, name, morning_time, last_morning_sent")
         .eq("is_active", True)
         .execute()
     )
@@ -60,8 +60,13 @@ async def _morning_job() -> None:
 
         now = datetime.now(tz)
 
-        # Only send if it is the user's morning reminder time
+        # Only send within the firing window for this user's morning time
         if not _time_matches(user_morning, now):
+            continue
+
+        # Dedup: skip if already sent a morning message today (in user's timezone)
+        today_str = now.date().isoformat()
+        if user.get("last_morning_sent") == today_str:
             continue
 
         sched_res = (
@@ -98,6 +103,8 @@ async def _morning_job() -> None:
                 personality=personality,
             )
             await whatsapp.send_text_message(phone, msg)
+            # Mark as sent today so a second firing within the window doesn't duplicate
+            await db.table("users").update({"last_morning_sent": today_str}).eq("id", user_id).execute()
             sent += 1
             logger.info("scheduler.morning_sent", user_id=user_id)
         except Exception as exc:  # noqa: BLE001
@@ -117,7 +124,7 @@ async def _evening_job() -> None:
 
     users_res = (
         await db.table("users")
-        .select("id, phone_number, timezone, personality, name, evening_time")
+        .select("id, phone_number, timezone, personality, name, evening_time, last_evening_sent")
         .eq("is_active", True)
         .execute()
     )
@@ -138,8 +145,13 @@ async def _evening_job() -> None:
 
         now = datetime.now(tz)
 
-        # Only send if it is the user's evening reminder time
+        # Only send within the firing window for this user's evening time
         if not _time_matches(user_evening, now):
+            continue
+
+        # Dedup: skip if already sent an evening message today (in user's timezone)
+        today_str = now.date().isoformat()
+        if user.get("last_evening_sent") == today_str:
             continue
 
         sched_res = (
@@ -203,6 +215,8 @@ async def _evening_job() -> None:
                 cl_balance=cl_balance,
             )
             await whatsapp.send_consolidated_evening_checkin(phone=phone, body_text=body)
+            # Mark as sent today so a second firing within the window doesn't duplicate
+            await db.table("users").update({"last_evening_sent": today_str}).eq("id", user_id).execute()
             sent += 1
             logger.info("scheduler.evening_sent", user_id=user_id)
         except Exception as exc:  # noqa: BLE001
@@ -215,11 +229,17 @@ async def _evening_job() -> None:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _time_matches(hhmm: str, now: datetime, lead_minutes: int = 2) -> bool:
-    """Return True if now is exactly `lead_minutes` before 'HH:MM'.
+def _time_matches(hhmm: str, now: datetime, lead_minutes: int = 2, window_minutes: int = 5) -> bool:
+    """Return True if *now* falls within *window_minutes* of the target firing time.
 
-    Firing early gives the server time to generate and deliver the message
-    so it arrives at the user's chosen time.
+    The target firing time is `lead_minutes` before the user's chosen time so
+    the message arrives on time after AI generation + network latency.
+
+    A 5-minute window (instead of an exact-minute check) ensures that
+    transient process restarts or deployment cold-starts on Render free tier
+    don't cause the job to be silently skipped for the entire day.
+    Duplicate sends are prevented by the `last_morning_sent` / `last_evening_sent`
+    deduplication check in the calling job function.
     """
     try:
         h, m = map(int, hhmm.split(":")[:2])
@@ -227,7 +247,8 @@ def _time_matches(hhmm: str, now: datetime, lead_minutes: int = 2) -> bool:
         return False
     target_mins = (h * 60 + m - lead_minutes) % (24 * 60)
     now_mins = now.hour * 60 + now.minute
-    return now_mins == target_mins
+    # True if now is within [target, target + window) (wrapping midnight)
+    return 0 <= (now_mins - target_mins) % (24 * 60) < window_minutes
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────

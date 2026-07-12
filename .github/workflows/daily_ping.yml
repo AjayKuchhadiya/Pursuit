@@ -2,10 +2,11 @@ name: Pursuit Keep-Alive
 
 on:
   schedule:
-    # Ping every 14 minutes to prevent Render free tier from sleeping.
-    # Morning/evening WhatsApp messages are now handled by APScheduler
-    # running inside the FastAPI process (exact-minute delivery).
-    - cron: "*/14 * * * *"
+    # Ping every 5 minutes to prevent Render free tier from sleeping.
+    # Morning/evening WhatsApp messages are handled by APScheduler inside
+    # the FastAPI process. A 5-minute interval keeps the process alive even
+    # when GitHub Actions delays the job by a few minutes.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
