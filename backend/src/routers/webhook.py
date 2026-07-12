@@ -21,10 +21,8 @@ from services import ai_agent, bot_personality, gamification, whatsapp
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 logger = structlog.get_logger(__name__)
 
-# In-memory message-ID deduplication — prevents Meta retry spam.
-# Meta retries the webhook if it doesn't receive a 200 within ~20 s, but the
-# AI agent can take longer. We ack immediately and process in a background
-# task; duplicate deliveries of the same message ID are silently dropped.
+# In-memory secondary cache — fast path for the current process lifetime.
+# The primary, restart-proof dedup is the `webhook_events` DB table.
 _seen_msg_ids: set[str] = set()
 
 
@@ -79,12 +77,32 @@ async def receive_webhook(body: WebhookPayload, db: SupabaseDep) -> dict:  # typ
         asyncio.create_task(_process_webhook(body, db))
         return {"status": "accepted"}
 
+    # ── Fast in-process check (avoids a DB round-trip for retries within the same boot) ──
     if msg_id in _seen_msg_ids:
-        logger.info("webhook.duplicate_ignored", msg_id=msg_id)
+        logger.info("webhook.duplicate_ignored", msg_id=msg_id, source="memory")
         return {"status": "duplicate"}
 
+    # ── Persistent check — survives server restarts and Render redeploys ──
+    try:
+        existing = (
+            await db.table("webhook_events")
+            .select("message_id")
+            .eq("message_id", msg_id)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            _seen_msg_ids.add(msg_id)  # warm the in-memory cache
+            logger.info("webhook.duplicate_ignored", msg_id=msg_id, source="db")
+            return {"status": "duplicate"}
+
+        # Mark as seen in DB before spawning the task
+        await db.table("webhook_events").insert({"message_id": msg_id}).execute()
+    except Exception as exc:
+        # DB check failed — fall through and process anyway (better a duplicate than silence)
+        logger.warning("webhook.dedup_db_error", msg_id=msg_id, error=str(exc))
+
     _seen_msg_ids.add(msg_id)
-    # Prevent unbounded memory growth on long-running servers
     if len(_seen_msg_ids) > 10_000:
         _seen_msg_ids.clear()
 
